@@ -112,7 +112,8 @@ async function createEvidenceFromSignals(orgId: string, signals: Awaited<ReturnT
     const categorySignals = signals[category as keyof typeof signals];
     if (!categorySignals || typeof categorySignals !== "object") continue;
 
-    const findings = (categorySignals as Record<string, unknown>).findings;
+    // Fix: cast to unknown first to satisfy TypeScript strict type checking
+    const findings = (categorySignals as unknown as Record<string, unknown>).findings;
     if (!Array.isArray(findings) || findings.length === 0) continue;
 
     const evidenceText = [
