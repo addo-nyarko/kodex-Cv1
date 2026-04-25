@@ -1,0 +1,46 @@
+export * from "./scan";
+
+export type { Prisma } from "@prisma/client";
+export {
+  Plan,
+  OrgRole,
+  FrameworkType,
+  FrameworkStatus,
+  ControlStatus,
+  ControlPriority,
+  EvidenceType,
+  EvidenceStatus,
+  RiskLevel,
+  RiskStatus,
+  PolicyStatus,
+  ScanStatus,
+  ControlResultStatus,
+  IntegrationType,
+  IntegrationStatus,
+  VendorRiskLevel,
+  AuditAction,
+  SubscriptionStatus,
+} from "@prisma/client";
+
+export type {
+  User,
+  Organization,
+  OrgMember,
+  Framework,
+  Control,
+  Evidence,
+  Scan,
+  ScanControlResult as DbScanControlResult,
+  ScanClarification,
+  Risk,
+  Policy,
+  Vendor,
+  Integration,
+  Subscription,
+  Task,
+  Comment,
+  AuditLog,
+  Notification,
+  ApiKey,
+  DataProcessingRecord,
+} from "@prisma/client";
