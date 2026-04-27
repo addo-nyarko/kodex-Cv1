@@ -468,9 +468,9 @@ export async function* streamGenerateDocument(
     messages: [{ role: "user", content: prompt }],
   });
 
-  // Use the text stream helper — most reliable across SDK versions
-  const textStream = stream.textStream;
-  for await (const text of textStream) {
-    yield text;
+  for await (const event of stream) {
+    if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+      yield event.delta.text;
+    }
   }
 }

@@ -196,8 +196,8 @@ async function fetchPageContent(pageId: string, token: string): Promise<string> 
   const MAX_BLOCKS = 100;
 
   do {
-    const url = `/blocks/${pageId}/children?page_size=100${cursor ? `&start_cursor=${cursor}` : ""}`;
-    const response = await notionJson<NotionBlocksResponse>(url, token);
+    const url: string = `/blocks/${pageId}/children?page_size=100${cursor ? `&start_cursor=${cursor}` : ""}`;
+    const response: NotionBlocksResponse | null = await notionJson<NotionBlocksResponse>(url, token);
     if (!response?.results) break;
 
     for (const block of response.results) {

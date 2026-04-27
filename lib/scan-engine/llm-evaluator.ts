@@ -154,15 +154,14 @@ function buildCodeSignalContext(
 
   const sections: string[] = ["\n## Code & Infrastructure Signals (automated scan results)"];
 
+  const keys = rule.evidenceKeys.join(" ").toLowerCase();
+  const title = rule.title.toLowerCase();
+
   const gh = codeSignals.github as Record<string, unknown> | undefined;
   if (gh) {
     sections.push(`GitHub Repository: ${gh.repo}`);
     sections.push(`Scanned at: ${gh.scannedAt}`);
     sections.push("");
-
-    // Only include signals relevant to this control's evidence keys
-    const keys = rule.evidenceKeys.join(" ").toLowerCase();
-    const title = rule.title.toLowerCase();
 
     // Security-related
     if (keys.includes("auth") || keys.includes("access") || title.includes("access") || title.includes("auth")) {

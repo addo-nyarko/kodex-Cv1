@@ -14,6 +14,7 @@
  */
 
 import puppeteer from "puppeteer";
+import type { Page } from "puppeteer-core";
 import type {
   SiteCheckResults,
   SecurityHeaderCheck,
@@ -204,7 +205,7 @@ function checkSecurityHeaders(headers: Record<string, string>): SecurityHeaderCh
 
 /* ── Cookie Banner ─────────────────────────────────────────────────── */
 
-async function checkCookieBanner(page: puppeteer.Page): Promise<CookieBannerCheck> {
+async function checkCookieBanner(page: Page): Promise<CookieBannerCheck> {
   // Try to find a cookie banner element
   for (const selector of COOKIE_BANNER_SELECTORS) {
     try {
@@ -212,7 +213,7 @@ async function checkCookieBanner(page: puppeteer.Page): Promise<CookieBannerChec
       if (!element) continue;
 
       // Check if it's actually visible
-      const isVisible = await element.evaluate((el) => {
+      const isVisible = await element.evaluate((el: Element) => {
         const style = window.getComputedStyle(el);
         const rect = el.getBoundingClientRect();
         return (
@@ -226,7 +227,7 @@ async function checkCookieBanner(page: puppeteer.Page): Promise<CookieBannerChec
       if (!isVisible) continue;
 
       // Extract text and check for reject/granular options
-      const bannerInfo = await element.evaluate((el) => {
+      const bannerInfo = await element.evaluate((el: Element) => {
         const text = el.textContent?.trim() ?? "";
         const buttons = Array.from(el.querySelectorAll("button, a, [role='button']"));
         const buttonTexts = buttons.map((b) => b.textContent?.trim().toLowerCase() ?? "");
@@ -262,7 +263,7 @@ async function checkCookieBanner(page: puppeteer.Page): Promise<CookieBannerChec
 /* ── Link Checks (Privacy Policy, Terms) ───────────────────────────── */
 
 async function checkLink(
-  page: puppeteer.Page,
+  page: Page,
   type: "privacy" | "terms"
 ): Promise<LinkCheck> {
   const keywords =
@@ -271,7 +272,7 @@ async function checkLink(
       : ["terms", "conditions", "tos", "nutzungsbedingungen", "agb", "terms of service", "terms of use", "legal"];
 
   try {
-    const linkInfo = await page.evaluate((kws) => {
+    const linkInfo = await page.evaluate((kws: string[]) => {
       const links = Array.from(document.querySelectorAll("a"));
       for (const link of links) {
         const text = (link.textContent ?? "").toLowerCase().trim();
@@ -324,9 +325,9 @@ async function checkLink(
 
 /* ── Data Collection (Forms & PII) ─────────────────────────────────── */
 
-async function checkDataCollection(page: puppeteer.Page): Promise<DataCollectionCheck> {
+async function checkDataCollection(page: Page): Promise<DataCollectionCheck> {
   try {
-    const formsData = await page.evaluate((piiPatterns) => {
+    const formsData = await page.evaluate((piiPatterns: Record<string, string>) => {
       const forms = Array.from(document.querySelectorAll("form"));
       return forms.map((form) => {
         const inputs = Array.from(form.querySelectorAll("input, select, textarea")).filter(
@@ -396,7 +397,7 @@ async function checkDataCollection(page: puppeteer.Page): Promise<DataCollection
 
 /* ── User Rights ───────────────────────────────────────────────────── */
 
-async function checkUserRights(page: puppeteer.Page): Promise<UserRightsCheck> {
+async function checkUserRights(page: Page): Promise<UserRightsCheck> {
   try {
     const rights = await page.evaluate(() => {
       const allText = document.body?.innerText?.toLowerCase() ?? "";
@@ -440,7 +441,7 @@ async function checkUserRights(page: puppeteer.Page): Promise<UserRightsCheck> {
 
 function detectTrackers(
   networkRequests: string[],
-  page: puppeteer.Page
+  page: Page
 ): TrackerCheck {
   const found = new Set<string>();
   let hasGA = false;
