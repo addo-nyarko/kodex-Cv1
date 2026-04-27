@@ -20,8 +20,8 @@ export default async function DashboardHome() {
 
   const score = org?.complianceScore ?? 0;
   const userName = org?.name || "there";
-  const activeFrameworks = org?.frameworks ?? [];
-  const projects = org?.projects ?? [];
+  const activeFrameworks: Array<{ id: string; type: string; score: number; status: string }> = org?.frameworks ?? [];
+  const projects: Array<{ id: string; name: string; description: string | null; complianceScore: number; updatedAt: Date }> = org?.projects ?? [];
 
   return (
     <div className="min-h-screen">
