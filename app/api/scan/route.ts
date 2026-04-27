@@ -2,11 +2,14 @@ import { getSession } from "@/lib/auth-helper";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { runScan, prepareEvidence } from "@/lib/scan-engine";
-import type { EvidencePool } from "@/types/scan";
+import {
+  saveScanState,
+  pushScanEvent,
+  queueNextChunk,
+  type ScanChunkState,
+} from "@/lib/queue/scan-queue";
 
 const StartScanSchema = z.object({
-  // Accept a single frameworkId (backwards compatible) or multiple
   frameworkId: z.string().optional(),
   frameworkIds: z.array(z.string()).optional(),
   questionnaire: z.record(z.string(), z.unknown()).optional(),
@@ -14,8 +17,6 @@ const StartScanSchema = z.object({
   (d) => d.frameworkId || (d.frameworkIds && d.frameworkIds.length > 0),
   { message: "At least one framework must be specified" }
 );
-
-export const maxDuration = 300; // Allow up to 5 minutes for scan
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -62,129 +63,54 @@ export async function POST(req: NextRequest) {
     )
   );
 
-  // Run scans sequentially and stream progress events via SSE
-  const stream = new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      const send = (data: object) => {
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-        } catch {
-          // Stream may have been closed by the client
-        }
-      };
+  const scanIds = scans.map((s) => s.id);
+  const firstScan = scans[0];
+  const firstFramework = frameworks[0];
 
-      const totalFrameworks = frameworks.length;
-      const scanIds = scans.map((s) => s.id);
+  // Build pending frameworks list for multi-framework scans
+  const pendingFrameworks = frameworks.length > 1
+    ? frameworks.slice(1).map((fw, i) => ({
+        scanId: scans[i + 1].id,
+        frameworkType: fw.type,
+      }))
+    : undefined;
 
-      // Send initial event with all scanIds
-      send({
-        scanId: scanIds[0],
-        scanIds,
-        message: totalFrameworks > 1
-          ? `Starting multi-framework scan — ${totalFrameworks} frameworks queued...`
-          : "Scan started — analyzing your evidence...",
-      });
+  // Initialize scan state in Redis
+  const initialState: ScanChunkState = {
+    scanId: firstScan.id,
+    frameworkType: firstFramework.type,
+    orgId,
+    controlIndex: 0,
+    totalControls: 0,
+    evidencePrepared: false,
+    useLLM: false,
+    clarificationAsked: false,
+    phase: "evidence",
+    pendingFrameworks,
+  };
 
-      // Prepare evidence ONCE — assembly + LLM synthesis shared across all frameworks
-      let sharedEvidence: EvidencePool | undefined;
+  await saveScanState(initialState);
 
-      if (totalFrameworks > 1) {
-        try {
-          const evidenceGen = prepareEvidence(orgId, scanIds[0]);
-          let result = await evidenceGen.next();
-          while (!result.done) {
-            const event = result.value;
-            if (event.type === "narration") {
-              send({ scanId: scanIds[0], message: event.message });
-            }
-            result = await evidenceGen.next();
-          }
-          sharedEvidence = result.value;
-        } catch (err) {
-          const errorMsg = err instanceof Error ? err.message : "Evidence preparation failed";
-          console.error("Evidence preparation error:", err);
-          send({ type: "error", message: errorMsg });
-          controller.close();
-          return;
-        }
-      }
+  // Push initial event for the frontend
+  const message = frameworks.length > 1
+    ? `Starting multi-framework scan — ${frameworks.length} frameworks queued...`
+    : "Scan started — analyzing your evidence...";
 
-      for (let i = 0; i < frameworks.length; i++) {
-        const fw = frameworks[i];
-        const scan = scans[i];
+  await pushScanEvent(firstScan.id, message);
 
-        if (totalFrameworks > 1) {
-          send({
-            scanId: scan.id,
-            message: `── Framework ${i + 1}/${totalFrameworks}: ${fw.type.replace(/_/g, " ")} ──`,
-          });
-        }
-
-        try {
-          const generator = runScan(scan.id, fw.type, orgId, sharedEvidence);
-
-          for await (const event of generator) {
-            if (event.type === "narration") {
-              send({ scanId: scan.id, message: event.message });
-            } else if (event.type === "clarification_needed") {
-              send({
-                type: "clarification_needed",
-                scanId: scan.id,
-                question: event.question,
-                controlCode: event.controlCode,
-              });
-            } else if (event.type === "cross_framework_hit") {
-              send({ scanId: scan.id, message: event.message });
-            } else if (event.type === "complete") {
-              if (i === frameworks.length - 1) {
-                // Last framework — signal overall completion
-                send({
-                  type: "complete",
-                  scanId: scan.id,
-                  scanIds,
-                  message: totalFrameworks > 1
-                    ? `All ${totalFrameworks} framework scans complete!`
-                    : "Scan complete!",
-                });
-              } else {
-                send({
-                  scanId: scan.id,
-                  message: `${fw.type.replace(/_/g, " ")} scan complete. Moving to next framework...`,
-                });
-              }
-            } else if (event.type === "error") {
-              send({ type: "error", message: event.message || "Scan failed" });
-            }
-          }
-        } catch (err) {
-          const errorMsg = err instanceof Error ? err.message : "Scan failed unexpectedly";
-          console.error(`Scan error (${fw.type}):`, err);
-
-          await db.scan.update({
-            where: { id: scan.id },
-            data: {
-              status: "FAILED",
-              errorMessage: errorMsg,
-              completedAt: new Date(),
-            },
-          }).catch(() => {});
-
-          send({ type: "error", scanId: scan.id, message: `${fw.type}: ${errorMsg}` });
-          // Continue to the next framework even if one fails
-        }
-      }
-
-      controller.close();
-    },
+  // Mark first scan as running
+  await db.scan.update({
+    where: { id: firstScan.id },
+    data: { status: "RUNNING", startedAt: new Date() },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
+  // Queue the first chunk via QStash
+  await queueNextChunk(firstScan.id);
+
+  // Return immediately — frontend will poll for progress
+  return Response.json({
+    scanId: firstScan.id,
+    scanIds,
+    message,
   });
 }

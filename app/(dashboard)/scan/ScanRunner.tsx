@@ -134,6 +134,9 @@ export default function ScanRunner() {
     }
   }, []);
 
+  // Track how many events we've already shown (for incremental polling)
+  const eventCountRef = useRef(0);
+
   async function startScan() {
     if (selectedIds.size === 0) return;
     setScanning(true);
@@ -141,6 +144,7 @@ export default function ScanRunner() {
     setResult(null);
     setEvents([]);
     setError(null);
+    eventCountRef.current = 0;
 
     const ids = Array.from(selectedIds);
 
@@ -155,71 +159,63 @@ export default function ScanRunner() {
         ),
       });
 
-      // Read SSE stream for live narration
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) {
-        setError("No response stream");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Scan failed" }));
+        setError(data.error || "Failed to start scan");
         setScanning(false);
+        scanningRef.current = false;
         return;
       }
 
-      let buffer = "";
-      let foundScanId: string | null = null;
+      const data = await res.json();
+      const newScanId = data.scanId;
+      setScanId(newScanId);
 
-      while (true) {
-        const { done: streamDone, value } = await reader.read();
-        if (streamDone) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-
-              if (data.scanId && !foundScanId) {
-                foundScanId = data.scanId;
-                setScanId(data.scanId);
-              }
-
-              if (data.message) {
-                setEvents((e) => [...e, data.message]);
-              }
-
-              if (data.type === "complete") {
-                if (data.scanId || foundScanId) {
-                  await pollScan(data.scanId || foundScanId);
-                }
-                setScanning(false);
-                scanningRef.current = false;
-              } else if (data.type === "error") {
-                setError(data.message || "Scan error");
-                setScanning(false);
-                scanningRef.current = false;
-              } else if (data.type === "clarification_needed") {
-                if (data.scanId || foundScanId) {
-                  await pollScan(data.scanId || foundScanId);
-                }
-                setScanning(false);
-                scanningRef.current = false;
-              }
-            } catch {
-              // Ignore parse errors
-            }
-          }
-        }
+      if (data.message) {
+        setEvents([data.message]);
       }
 
-      // If we got a scanId but never got a terminal event, start polling
-      if (foundScanId && scanningRef.current) {
-        pollRef.current = setInterval(() => pollScan(foundScanId!), 2000);
-      }
+      // Start polling for progress + results
+      pollRef.current = setInterval(() => pollProgress(newScanId), 2000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start scan");
       setScanning(false);
       scanningRef.current = false;
+    }
+  }
+
+  /** Poll for scan progress (events + status) */
+  async function pollProgress(id: string) {
+    try {
+      const res = await fetch(`/api/scan/status/${id}?eventsSince=${eventCountRef.current}`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      // Append new narration events
+      if (data.events && data.events.length > 0) {
+        setEvents((prev) => [...prev, ...data.events]);
+        eventCountRef.current = data.eventCount;
+      }
+
+      // Check terminal states
+      if (data.status === "COMPLETED") {
+        setResult(data);
+        setScanning(false);
+        scanningRef.current = false;
+        if (pollRef.current) clearInterval(pollRef.current);
+      } else if (data.status === "FAILED") {
+        setError(data.errorMessage || "Scan failed");
+        setScanning(false);
+        scanningRef.current = false;
+        if (pollRef.current) clearInterval(pollRef.current);
+      } else if (data.status === "AWAITING_CLARIFICATION") {
+        setResult(data);
+        setScanning(false);
+        scanningRef.current = false;
+        if (pollRef.current) clearInterval(pollRef.current);
+      }
+    } catch {
+      // Keep polling on network errors
     }
   }
 
@@ -243,10 +239,11 @@ export default function ScanRunner() {
           setError(data.errorMessage || "Scan failed");
           setResult(data);
         } else if (data.status === "QUEUED" || data.status === "RUNNING") {
-          // Scan was resumed! Start polling for completion
+          // Scan was resumed! Start polling for completion with events
           setScanning(true);
           setEvents((e) => [...e, "Scan resumed after clarification..."]);
-          pollRef.current = setInterval(() => pollScan(result.id), 2000);
+          eventCountRef.current = 0;
+          pollRef.current = setInterval(() => pollProgress(result.id), 2000);
         }
         // If still AWAITING_CLARIFICATION, user hasn't answered yet — keep showing the prompt
       } catch {

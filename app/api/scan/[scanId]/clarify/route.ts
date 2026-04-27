@@ -2,7 +2,14 @@ import { getSession } from "@/lib/auth-helper";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { runScan } from "@/lib/scan-engine";
+import {
+  loadScanState,
+  saveScanState,
+  pushScanEvent,
+  queueNextChunk,
+  type ScanChunkState,
+} from "@/lib/queue/scan-queue";
+import { frameworkRegistry } from "@/lib/frameworks/registry";
 
 const ClarifySchema = z.object({ answer: z.string().min(1) });
 
@@ -29,8 +36,7 @@ export async function POST(
 
   const answer = body.data.answer;
 
-  // Detect if the answer is correcting a previous onboarding mistake
-  // (e.g., "typo, we do use AI", "yes we use AI", "correction: we use AI")
+  // Detect AI usage corrections
   await detectAndApplyCorrections(orgId, answer);
 
   await db.scanClarification.create({
@@ -45,40 +51,45 @@ export async function POST(
 
   await db.scan.update({
     where: { id: scanId },
-    data: { status: "QUEUED", pendingQuestion: null, pendingControlCode: null },
+    data: { status: "RUNNING", pendingQuestion: null, pendingControlCode: null },
   });
 
-  // Resume scan inline with correct framework type
-  const generator = runScan(scanId, scan.framework.type, orgId);
-  // Consume the generator in the background — don't block the response
-  (async () => {
-    try {
-      for await (const _event of generator) { /* events handled inside runScan */ }
-    } catch (err) {
-      console.error("Resumed scan failed:", err);
-      await db.scan.update({
-        where: { id: scanId },
-        data: {
-          status: "FAILED",
-          errorMessage: err instanceof Error ? err.message : "Scan failed",
-          completedAt: new Date(),
-        },
-      }).catch(() => {});
-    }
-  })();
+  await pushScanEvent(scanId, "Clarification received — resuming scan...");
+
+  // Try to load existing state from Redis
+  let state = await loadScanState(scanId);
+
+  if (state) {
+    // Resume from where we left off — move past the control that needed clarification
+    state.controlIndex = state.controlIndex + 1;
+    state.clarificationAsked = false;
+    await saveScanState(state);
+  } else {
+    // State expired — reinitialize from scratch
+    const plugin = frameworkRegistry.get(scan.framework.type);
+    const newState: ScanChunkState = {
+      scanId,
+      frameworkType: scan.framework.type,
+      orgId,
+      controlIndex: 0,
+      totalControls: plugin?.rules.length ?? 0,
+      evidencePrepared: false,
+      useLLM: false,
+      clarificationAsked: false,
+      phase: "evidence", // Re-assemble evidence since it expired
+    };
+    await saveScanState(newState);
+  }
+
+  // Queue the next chunk
+  await queueNextChunk(scanId);
 
   return Response.json({ ok: true });
 }
 
-/**
- * Detect if the user's answer corrects an onboarding field
- * (like AI usage) and update the org record accordingly.
- * This way the resumed scan will use the corrected data.
- */
 async function detectAndApplyCorrections(orgId: string, answer: string) {
   const lower = answer.toLowerCase();
 
-  // Detect AI usage corrections
   const aiCorrectionPatterns = [
     /typo.*(?:we|i|our).*(?:do|does|actually).*use.*ai/i,
     /correction.*(?:we|i|our).*use.*ai/i,
