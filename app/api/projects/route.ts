@@ -178,14 +178,14 @@ export async function GET() {
   const limit = PLAN_PROJECT_LIMITS[plan] ?? 2;
 
   return Response.json({
-    projects: projects.map((p) => ({
+    projects: (projects as any[]).map((p: any) => ({
       id: p.id,
       name: p.name,
       description: p.description,
       industry: p.industry,
       complianceScore: p.complianceScore,
       frameworkCount: p.frameworks.length,
-      frameworks: p.frameworks.map((f) => ({ type: f.type, score: f.score })),
+      frameworks: p.frameworks.map((f: any) => ({ type: f.type, score: f.score })),
       scanCount: p.scans.length,
       lastScanDate: p.scans[0]?.completedAt ?? null,
       documentCount: p.documents.length,

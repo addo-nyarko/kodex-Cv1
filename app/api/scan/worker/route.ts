@@ -160,7 +160,7 @@ async function processControlsPhase(state: ScanChunkState): Promise<void> {
     where: { scanId },
     select: { control: { select: { code: true } } },
   });
-  const alreadyEvaluated = new Set(existingResults.map((r) => r.control.code));
+  const alreadyEvaluated = new Set((existingResults as any[]).map((r: any) => r.control.code));
 
   const startIdx = state.controlIndex;
   const endIdx = Math.min(startIdx + CONTROLS_PER_CHUNK, plugin.rules.length);
@@ -286,7 +286,7 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
     include: { control: { select: { id: true, code: true, title: true } } },
   });
 
-  const controlResults = scanResults.map((r) => ({
+  const controlResults = (scanResults as any[]).map((r: any) => ({
     controlId: r.control.id,
     controlCode: r.control.code,
     controlTitle: r.control.title,
@@ -320,7 +320,7 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
     select: { score: true },
   });
   const avgScore = allFrameworks.length > 0
-    ? Math.round(allFrameworks.reduce((sum, f) => sum + f.score, 0) / allFrameworks.length)
+    ? Math.round(allFrameworks.reduce((sum: number, f: any) => sum + f.score, 0) / allFrameworks.length)
     : 0;
 
   await db.organization.update({
@@ -340,7 +340,7 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
     });
     if (projectFrameworks.length > 0) {
       const projectAvg = Math.round(
-        projectFrameworks.reduce((sum, f) => sum + f.score, 0) / projectFrameworks.length
+        projectFrameworks.reduce((sum: number, f: any) => sum + f.score, 0) / projectFrameworks.length
       );
       await db.project.update({
         where: { id: scanRecord.projectId },

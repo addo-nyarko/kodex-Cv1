@@ -54,7 +54,7 @@ export async function GET(
     // Live narration events
     events: newEvents,
     eventCount: allEvents.length,
-    controlResults: scan.controlResults.map((r) => ({
+    controlResults: (scan.controlResults as any[]).map((r: any) => ({
       id: r.id,
       controlCode: r.control.code,
       controlTitle: r.control.title,

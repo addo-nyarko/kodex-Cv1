@@ -43,7 +43,7 @@ export async function GET(
     riskLevel: scan.riskLevel ?? "UNKNOWN",
     startedAt: scan.startedAt?.toISOString() ?? scan.createdAt.toISOString(),
     completedAt: scan.completedAt?.toISOString() ?? new Date().toISOString(),
-    controlResults: scan.controlResults.map((r) => ({
+    controlResults: (scan.controlResults as any[]).map((r: any) => ({
       controlCode: r.control.code,
       controlTitle: r.control.title,
       status: r.status,

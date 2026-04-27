@@ -119,8 +119,8 @@ async function createEvidenceFromNotionPages(
       page.textContent,
     ].join("\n");
 
-    for (const fw of frameworks) {
-      for (const ctrl of fw.controls) {
+    for (const fw of frameworks as any[]) {
+      for (const ctrl of fw.controls as any[]) {
         if (controlCodes.includes(ctrl.code)) {
           const evidenceId = `notion-${orgId}-${page.id}-${ctrl.id}`.slice(0, 25);
 

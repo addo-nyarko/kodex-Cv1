@@ -127,8 +127,8 @@ async function createEvidenceFromSignals(orgId: string, signals: Awaited<ReturnT
     ].join("\n");
 
     // Find matching controls and create evidence
-    for (const fw of frameworks) {
-      for (const ctrl of fw.controls) {
+    for (const fw of frameworks as any[]) {
+      for (const ctrl of fw.controls as any[]) {
         if (controlCodes.includes(ctrl.code)) {
           await db.evidence.upsert({
             where: {

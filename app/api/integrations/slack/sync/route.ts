@@ -116,8 +116,8 @@ async function createEvidenceFromSlackSignals(
   // Slack signals are most relevant to incident response and organizational measures
   const controlCodes = ["GDPR-Art32", "GDPR-Art33", "NIS2-Art21"];
 
-  for (const fw of frameworks) {
-    for (const ctrl of fw.controls) {
+  for (const fw of frameworks as any[]) {
+    for (const ctrl of fw.controls as any[]) {
       if (controlCodes.includes(ctrl.code)) {
         await db.evidence.upsert({
           where: { id: `slack-${orgId}-${ctrl.id}`.slice(0, 25) },

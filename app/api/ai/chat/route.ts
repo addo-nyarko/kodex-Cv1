@@ -27,9 +27,11 @@ export async function POST(req: NextRequest) {
         },
       });
       if (scan) {
-        const completedControls = scan.controlResults.length;
-        const passedControls = scan.controlResults.filter((r) => r.status === "PASS").length;
-        const priorClarifications = scan.clarifications
+        const controlResults: Array<{ status: string; control: { code: string } }> = scan.controlResults as any;
+        const clarifications: Array<{ controlCode: string; question: string; answer: string | null }> = scan.clarifications as any;
+        const completedControls = controlResults.length;
+        const passedControls = controlResults.filter((r) => r.status === "PASS").length;
+        const priorClarifications = clarifications
           .filter((c) => c.answer)
           .map((c) => `  Q (${c.controlCode}): ${c.question}\n  A: ${c.answer}`)
           .join("\n");

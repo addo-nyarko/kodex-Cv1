@@ -78,7 +78,7 @@ export async function assembleEvidence(orgId: string, scanId: string): Promise<E
     .flat();
 
   const clarifications: Record<string, string> = {};
-  for (const c of scan.clarifications) {
+  for (const c of (scan as any).clarifications) {
     if (c.controlCode && c.answer) {
       clarifications[c.controlCode] = c.answer;
     }

@@ -121,7 +121,7 @@ export async function* runScan(
     where: { scanId },
     select: { control: { select: { code: true } } },
   });
-  const alreadyEvaluated = new Set(existingResults.map((r) => r.control.code));
+  const alreadyEvaluated = new Set((existingResults as any[]).map((r: any) => r.control.code));
 
   // Decide whether to use LLM evaluation
   const hasDocumentsNow = evidence.documents.some((d) => d.text.length > 100);
@@ -318,7 +318,7 @@ export async function* runScan(
     select: { score: true },
   });
   const avgScore = allFrameworks.length > 0
-    ? Math.round(allFrameworks.reduce((sum, f) => sum + f.score, 0) / allFrameworks.length)
+    ? Math.round(allFrameworks.reduce((sum: number, f: any) => sum + f.score, 0) / allFrameworks.length)
     : 0;
 
   await db.organization.update({
@@ -338,7 +338,7 @@ export async function* runScan(
     });
     if (projectFrameworks.length > 0) {
       const projectAvg = Math.round(
-        projectFrameworks.reduce((sum, f) => sum + f.score, 0) / projectFrameworks.length
+        projectFrameworks.reduce((sum: number, f: any) => sum + f.score, 0) / projectFrameworks.length
       );
       await db.project.update({
         where: { id: scanRecord.projectId },

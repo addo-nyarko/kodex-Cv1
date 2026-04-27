@@ -76,7 +76,7 @@ export async function GET() {
 
     return Response.json({
       checklist: org.documentChecklist ?? [],
-      frameworks: org.frameworks,
+      frameworks: org.frameworks as any,
       applicableFrameworks: org.applicableFrameworks,
       riskTier: org.riskTier,
       uploadedEvidence: evidence.map((e) => ({

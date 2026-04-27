@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
 
   // Create a scan record for each framework
   const scans = await Promise.all(
-    frameworks.map((fw) =>
+    frameworks.map((fw: any) =>
       db.scan.create({
         data: {
           orgId,
@@ -63,13 +63,13 @@ export async function POST(req: NextRequest) {
     )
   );
 
-  const scanIds = scans.map((s) => s.id);
+  const scanIds = scans.map((s: any) => s.id);
   const firstScan = scans[0];
-  const firstFramework = frameworks[0];
+  const firstFramework = frameworks[0] as any;
 
   // Build pending frameworks list for multi-framework scans
   const pendingFrameworks = frameworks.length > 1
-    ? frameworks.slice(1).map((fw, i) => ({
+    ? frameworks.slice(1).map((fw: any, i: number) => ({
         scanId: scans[i + 1].id,
         frameworkType: fw.type,
       }))
