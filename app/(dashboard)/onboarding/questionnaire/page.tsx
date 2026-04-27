@@ -142,7 +142,7 @@ export default function QuestionnairePage() {
         </div>
 
         <button
-          onClick={() => router.push("/evidence")}
+          onClick={() => router.push("/documents")}
           className="px-6 py-3 bg-primary rounded-lg hover:bg-primary/90 font-medium"
         >
           Upload documents →

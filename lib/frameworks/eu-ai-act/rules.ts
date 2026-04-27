@@ -15,6 +15,21 @@ function hasDoc(ev: EvidencePool, ...keywords: string[]): boolean {
   );
 }
 
+/** Check if GitHub code signals contain a specific capability */
+function hasGitSignal(ev: EvidencePool, key: string): boolean {
+  const gh = ev.codeSignals?.github as Record<string, unknown> | undefined;
+  if (!gh) return false;
+  return !!gh[key];
+}
+
+function isHighRiskProcessing(ev: EvidencePool): boolean {
+  const highRiskCategories = ["health", "financial", "biometric", "children"];
+  return (
+    ev.onboarding.dataCategories.some((c) => highRiskCategories.includes(c)) ||
+    ev.onboarding.usesAI
+  );
+}
+
 export const euAiActRules: ControlRule[] = [
   {
     id: "EU_AI_001_prohibited_practices",
@@ -24,6 +39,17 @@ export const euAiActRules: ControlRule[] = [
     evidenceKeys: ["q_prohibited_practices", "ai_system_description"],
     articleRefs: { EU_AI_ACT: "Art. 5" },
     check: (ev) => {
+      if (!ev.onboarding.usesAI) {
+        return {
+          status: "PASS",
+          confidence: 0.85,
+          evidenceUsed: [],
+          gaps: [],
+          remediations: [],
+          lawyerQuestions: [],
+          note: "Company does not use AI — Art. 5 prohibited practices not applicable.",
+        };
+      }
       const answered = !!ev.questionnaire["q_prohibited_practices"];
       const prohibited = ev.questionnaire["q_prohibited_practices"] === "yes";
       if (!answered) {
@@ -67,16 +93,27 @@ export const euAiActRules: ControlRule[] = [
     evidenceKeys: ["q_risk_classification", "risk_assessment_doc"],
     articleRefs: { EU_AI_ACT: "Art. 6" },
     check: (ev) => {
+      if (!ev.onboarding.usesAI) {
+        return {
+          status: "PASS",
+          confidence: 0.85,
+          evidenceUsed: [],
+          gaps: [],
+          remediations: [],
+          lawyerQuestions: [],
+          note: "Company does not use AI — risk classification not applicable.",
+        };
+      }
       const hasClassification = !!ev.questionnaire["q_risk_classification"];
-      const hasDoc = ev.documents.some((d) =>
+      const hasRiskDoc = ev.documents.some((d) =>
         d.text.toLowerCase().includes("risk classification") || d.fileName.toLowerCase().includes("risk")
       );
       return {
-        status: hasClassification ? (hasDoc ? "PASS" : "PARTIAL") : "NO_EVIDENCE",
-        confidence: hasClassification && hasDoc ? 0.9 : hasClassification ? 0.6 : 0.2,
-        evidenceUsed: [hasClassification ? "q_risk_classification" : "", hasDoc ? "risk_assessment_doc" : ""].filter(Boolean),
-        gaps: hasDoc ? [] : ["No formal risk classification document found"],
-        remediations: hasDoc ? [] : ["Document your AI system's risk level per Art. 6 Annex III criteria"],
+        status: hasClassification ? (hasRiskDoc ? "PASS" : "PARTIAL") : "NO_EVIDENCE",
+        confidence: hasClassification && hasRiskDoc ? 0.9 : hasClassification ? 0.6 : 0.2,
+        evidenceUsed: [hasClassification ? "q_risk_classification" : "", hasRiskDoc ? "risk_assessment_doc" : ""].filter(Boolean),
+        gaps: hasRiskDoc ? [] : ["No formal risk classification document found"],
+        remediations: hasRiskDoc ? [] : ["Document your AI system's risk level per Art. 6 Annex III criteria"],
         lawyerQuestions: ["Does our AI system fall under Annex III high-risk categories, specifically given our use in " + ev.onboarding.industry + "?"],
         note: "Art. 6 requires risk classification for all AI systems.",
       };
@@ -91,6 +128,12 @@ export const euAiActRules: ControlRule[] = [
     articleRefs: { EU_AI_ACT: "Art. 11" },
     check: (ev) => {
       const hasTechDoc = hasDoc(ev, "technical documentation", "architecture", "system design", "model card");
+      // GitHub: check for architecture docs, README, and doc files
+      const repoHasArchDocs = hasGitSignal(ev, "hasArchitectureDocs");
+      const repoHasReadme = hasGitSignal(ev, "hasReadme");
+      const gh = ev.codeSignals?.github as Record<string, unknown> | undefined;
+      const repoDocCount = (gh?.docCount as number) ?? 0;
+
       if (!usesHighRiskAI(ev)) {
         return {
           status: "PASS",
@@ -102,14 +145,33 @@ export const euAiActRules: ControlRule[] = [
           note: "Art. 11 documentation is mandatory only for high-risk AI systems.",
         };
       }
+
+      const hasAnyTechDoc = hasTechDoc || repoHasArchDocs;
+      const sources: string[] = [];
+      if (hasTechDoc) sources.push("technical_doc");
+      if (repoHasArchDocs) sources.push("GitHub: architecture docs");
+      if (repoHasReadme) sources.push("GitHub: README");
+
+      if (hasAnyTechDoc) {
+        return {
+          status: hasTechDoc ? "PASS" : "PARTIAL",
+          confidence: hasTechDoc ? 0.85 : 0.6,
+          evidenceUsed: sources,
+          gaps: hasTechDoc ? [] : ["Architecture docs found in repo but formal Art. 11 documentation needed"],
+          remediations: hasTechDoc ? [] : ["Expand existing docs into full Annex IV technical documentation including training data, architecture, and performance metrics"],
+          lawyerQuestions: ["What specific information must our technical documentation contain per Art. 11 and Annex IV given our system type?"],
+          note: `Technical documentation ${hasTechDoc ? "found" : "partially available from repo (architecture docs detected)"}.`,
+        };
+      }
+
       return {
-        status: hasTechDoc ? "PASS" : "FAIL",
-        confidence: hasTechDoc ? 0.85 : 0.9,
-        evidenceUsed: hasTechDoc ? ["technical_doc"] : [],
-        gaps: hasTechDoc ? [] : ["High-risk AI system lacks Art. 11 technical documentation"],
-        remediations: hasTechDoc ? [] : ["Create Annex IV technical documentation including system description, training data, architecture, and performance metrics"],
+        status: "FAIL",
+        confidence: 0.9,
+        evidenceUsed: sources,
+        gaps: ["High-risk AI system lacks Art. 11 technical documentation"],
+        remediations: ["Create Annex IV technical documentation including system description, training data, architecture, and performance metrics"],
         lawyerQuestions: ["What specific information must our technical documentation contain per Art. 11 and Annex IV given our system type?"],
-        note: `High-risk AI: technical documentation ${hasTechDoc ? "found" : "missing"}.`,
+        note: `High-risk AI: technical documentation missing.${repoDocCount > 0 ? ` (${repoDocCount} doc files in repo, but none cover Art. 11 requirements)` : ""}`,
       };
     },
   },
@@ -121,22 +183,46 @@ export const euAiActRules: ControlRule[] = [
     evidenceKeys: ["user_documentation", "transparency_notice"],
     articleRefs: { EU_AI_ACT: "Art. 13" },
     check: (ev) => {
+      if (!ev.onboarding.usesAI) {
+        return {
+          status: "PASS",
+          confidence: 0.85,
+          evidenceUsed: [],
+          gaps: [],
+          remediations: [],
+          lawyerQuestions: [],
+          note: "Company does not use AI — Art. 13 transparency not applicable.",
+        };
+      }
       const hasTransparency = hasDoc(ev, "ai disclosure", "automated", "ai-assisted", "transparency");
       const hasUserDoc = hasDoc(ev, "user guide", "user manual", "instructions for use");
+      // GitHub: README and API docs can serve as user documentation
+      const repoHasReadme = hasGitSignal(ev, "hasReadme");
+      const repoHasApiDocs = hasGitSignal(ev, "hasApiDocs");
+
+      const hasAnyUserDoc = hasUserDoc || repoHasReadme || repoHasApiDocs;
+      const sources: string[] = [];
+      if (hasTransparency) sources.push("transparency_notice");
+      if (hasUserDoc) sources.push("user_documentation");
+      if (repoHasReadme) sources.push("GitHub: README");
+      if (repoHasApiDocs) sources.push("GitHub: API documentation");
+
       return {
-        status: hasTransparency && hasUserDoc ? "PASS" : hasTransparency || hasUserDoc ? "PARTIAL" : "NO_EVIDENCE",
-        confidence: hasTransparency && hasUserDoc ? 0.9 : 0.4,
-        evidenceUsed: [hasTransparency ? "transparency_notice" : "", hasUserDoc ? "user_documentation" : ""].filter(Boolean),
+        status: hasTransparency && hasAnyUserDoc ? "PASS" : hasTransparency || hasAnyUserDoc ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: hasTransparency && hasAnyUserDoc ? 0.9 : hasTransparency || hasAnyUserDoc ? 0.5 : 0.2,
+        evidenceUsed: sources,
         gaps: [
           ...(!hasTransparency ? ["No AI transparency disclosure found"] : []),
-          ...(!hasUserDoc ? ["No user documentation for AI system found"] : []),
+          ...(!hasAnyUserDoc ? ["No user documentation for AI system found"] : []),
         ],
         remediations: [
           ...(!hasTransparency ? ["Add clear disclosure that users are interacting with or being evaluated by an AI system"] : []),
-          ...(!hasUserDoc ? ["Create user-facing documentation explaining AI system capabilities and limitations"] : []),
+          ...(!hasAnyUserDoc ? ["Create user-facing documentation explaining AI system capabilities and limitations"] : []),
         ],
         lawyerQuestions: ["What specific disclosures are required under Art. 13 for our AI system type and use case?"],
-        note: "Art. 13 requires transparent, understandable information about high-risk AI systems.",
+        note: hasTransparency || hasAnyUserDoc
+          ? `Transparency evidence found${repoHasReadme || repoHasApiDocs ? " (including repo documentation)" : ""}.`
+          : "Art. 13 requires transparent, understandable information about high-risk AI systems.",
       };
     },
   },
@@ -169,6 +255,93 @@ export const euAiActRules: ControlRule[] = [
         remediations: hasProc ? [] : ["Document human oversight procedures including who reviews AI outputs, escalation paths, and override mechanisms"],
         lawyerQuestions: ["What level of human oversight satisfies Art. 14 for our specific AI use case — does manager review qualify as 'meaningful human oversight'?"],
         note: `Human oversight: ${hasOversight && hasProc ? "documented" : "insufficient"}.`,
+      };
+    },
+  },
+  {
+    id: "EU_AI_006_quality_management",
+    code: "AI-Art15",
+    title: "Quality management and testing procedures",
+    frameworks: ["EU_AI_ACT"],
+    evidenceKeys: ["quality_management", "testing_procedures"],
+    articleRefs: { EU_AI_ACT: "Art. 15" },
+    check: (ev) => {
+      if (!ev.onboarding.usesAI) {
+        return {
+          status: "PASS",
+          confidence: 0.85,
+          evidenceUsed: [],
+          gaps: [],
+          remediations: [],
+          lawyerQuestions: [],
+          note: "Company does not use AI — Art. 15 quality management not applicable.",
+        };
+      }
+
+      const hasQualityDoc = hasDoc(ev, "quality management", "testing", "qa", "validation", "accuracy");
+      // GitHub: CI/CD, tests, code scanning, branch protection = quality management evidence
+      const hasCI = hasGitSignal(ev, "hasCI");
+      const hasTests = hasGitSignal(ev, "hasTests");
+      const hasCodeScan = hasGitSignal(ev, "hasCodeScanning");
+      const hasDependabot = hasGitSignal(ev, "hasDependabot");
+      const hasBranchProt = hasGitSignal(ev, "hasBranchProtection");
+
+      const codeQualityCount = [hasCI, hasTests, hasCodeScan, hasDependabot, hasBranchProt].filter(Boolean).length;
+
+      const sources: string[] = [];
+      if (hasQualityDoc) sources.push("quality_management");
+      if (hasCI) sources.push("GitHub: CI/CD pipelines");
+      if (hasTests) sources.push("GitHub: automated tests");
+      if (hasCodeScan) sources.push("GitHub: code scanning");
+      if (hasDependabot) sources.push("GitHub: Dependabot");
+      if (hasBranchProt) sources.push("GitHub: branch protection");
+
+      if (hasQualityDoc && codeQualityCount >= 2) {
+        return {
+          status: "PASS",
+          confidence: 0.9,
+          evidenceUsed: sources,
+          gaps: [],
+          remediations: [],
+          lawyerQuestions: [],
+          note: `Strong quality management: documented procedures + ${codeQualityCount} automated quality measures in codebase.`,
+        };
+      }
+      if (codeQualityCount >= 3) {
+        return {
+          status: "PARTIAL",
+          confidence: 0.7,
+          evidenceUsed: sources,
+          gaps: ["Code quality measures exist but no formal quality management document"],
+          remediations: ["Document your quality management system formally, referencing your existing CI/CD, testing, and review processes"],
+          lawyerQuestions: [],
+          note: `${codeQualityCount} quality measures detected in code. Formal documentation would complete Art. 15.`,
+        };
+      }
+      if (hasQualityDoc || codeQualityCount > 0) {
+        return {
+          status: "PARTIAL",
+          confidence: 0.5,
+          evidenceUsed: sources,
+          gaps: [
+            ...(!hasQualityDoc ? ["No formal quality management document"] : []),
+            ...(!hasTests ? ["No automated testing detected"] : []),
+            ...(!hasCI ? ["No CI/CD pipeline detected"] : []),
+          ],
+          remediations: ["Implement automated testing, CI/CD pipelines, and document your quality management system"],
+          lawyerQuestions: ["What testing and validation standards apply under Art. 15 for our AI system risk level?"],
+          note: "Partial quality management evidence found.",
+        };
+      }
+
+      return {
+        status: "NO_EVIDENCE",
+        confidence: 0.15,
+        evidenceUsed: [],
+        gaps: ["No quality management documentation or automated quality measures detected"],
+        remediations: ["Establish a quality management system with automated testing, CI/CD, code review, and documentation"],
+        lawyerQuestions: ["What testing and validation standards apply under Art. 15 for our AI system risk level?"],
+        note: "Art. 15 requires accuracy, robustness, and cybersecurity measures for AI systems.",
       };
     },
   },
@@ -212,11 +385,3 @@ export const euAiActRules: ControlRule[] = [
     },
   },
 ];
-
-function isHighRiskProcessing(ev: EvidencePool): boolean {
-  const highRiskCategories = ["health", "financial", "biometric", "children"];
-  return (
-    ev.onboarding.dataCategories.some((c) => highRiskCategories.includes(c)) ||
-    ev.onboarding.usesAI
-  );
-}

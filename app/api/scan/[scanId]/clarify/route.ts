@@ -27,12 +27,18 @@ export async function POST(
     return Response.json({ error: "Scan not awaiting clarification" }, { status: 400 });
   }
 
+  const answer = body.data.answer;
+
+  // Detect if the answer is correcting a previous onboarding mistake
+  // (e.g., "typo, we do use AI", "yes we use AI", "correction: we use AI")
+  await detectAndApplyCorrections(orgId, answer);
+
   await db.scanClarification.create({
     data: {
       scanId,
       question: scan.pendingQuestion ?? "",
       controlCode: scan.pendingControlCode,
-      answer: body.data.answer,
+      answer,
       answeredAt: new Date(),
     },
   });
@@ -62,4 +68,38 @@ export async function POST(
   })();
 
   return Response.json({ ok: true });
+}
+
+/**
+ * Detect if the user's answer corrects an onboarding field
+ * (like AI usage) and update the org record accordingly.
+ * This way the resumed scan will use the corrected data.
+ */
+async function detectAndApplyCorrections(orgId: string, answer: string) {
+  const lower = answer.toLowerCase();
+
+  // Detect AI usage corrections
+  const aiCorrectionPatterns = [
+    /typo.*(?:we|i|our).*(?:do|does|actually).*use.*ai/i,
+    /correction.*(?:we|i|our).*use.*ai/i,
+    /(?:we|i|our).*(?:do|does|actually).*use.*ai/i,
+    /yes.*(?:we|i|our).*use.*ai/i,
+    /(?:we|i).*deploy.*ai/i,
+    /(?:we|i).*have.*ai.*system/i,
+  ];
+
+  const noAiPatterns = [
+    /(?:we|i).*(?:do not|don't|dont).*use.*ai/i,
+    /no.*ai/i,
+  ];
+
+  if (aiCorrectionPatterns.some((p) => p.test(lower)) && !noAiPatterns.some((p) => p.test(lower))) {
+    await db.organization.update({
+      where: { id: orgId },
+      data: {
+        usesAI: true,
+        aiDescription: `Corrected during scan: ${answer}`,
+      },
+    });
+  }
 }

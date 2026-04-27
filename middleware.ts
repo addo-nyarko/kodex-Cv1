@@ -6,7 +6,6 @@ const isPublicRoute = createRouteMatcher([
   "/",
   "/pricing(.*)",
   "/features(.*)",
-  "/frameworks(.*)",
   "/blog(.*)",
   "/legal(.*)",
   "/sign-in(.*)",
@@ -14,8 +13,30 @@ const isPublicRoute = createRouteMatcher([
   "/api/webhooks(.*)",
 ]);
 
+const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
+
 export default clerkMiddleware(async (auth, req: NextRequest) => {
-  if (!isPublicRoute(req)) await auth.protect();
+  // Protect all non-public routes
+  if (!isPublicRoute(req)) {
+    await auth.protect();
+  }
+
+  const { userId, sessionClaims } = await auth();
+
+  // If user is signed in but hasn't completed onboarding,
+  // redirect to onboarding (unless they're already there or on an API route)
+  if (
+    userId &&
+    !isOnboardingRoute(req) &&
+    !isPublicRoute(req) &&
+    !req.nextUrl.pathname.startsWith("/api/") &&
+    sessionClaims?.metadata &&
+    typeof sessionClaims.metadata === "object" &&
+    "onboardingComplete" in sessionClaims.metadata &&
+    sessionClaims.metadata.onboardingComplete === false
+  ) {
+    return NextResponse.redirect(new URL("/onboarding", req.url));
+  }
 
   const res = NextResponse.next();
 

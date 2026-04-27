@@ -67,7 +67,7 @@ export default function IntegrationsPage() {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<Record<string, unknown> | null>(null);
+  const [syncing, setSyncing] = useState<string | null>(null); // tracks which integration is syncing
   const [error, setError] = useState<string | null>(null);
 
   // Check URL params for OAuth callback results
@@ -123,7 +123,6 @@ export default function IntegrationsPage() {
       body: JSON.stringify({ type }),
     });
     setRepos([]);
-    setScanResult(null);
     fetchStatus();
   };
 
@@ -140,9 +139,34 @@ export default function IntegrationsPage() {
     }
   };
 
+  const handleSyncIntegration = async (type: string) => {
+    const syncRoutes: Record<string, string> = {
+      GOOGLE_WORKSPACE: "/api/integrations/google/sync",
+      CUSTOM_WEBHOOK: "/api/integrations/notion/sync",
+      SLACK: "/api/integrations/slack/sync",
+    };
+    const route = syncRoutes[type];
+    if (!route) return;
+
+    setSyncing(type);
+    setError(null);
+    try {
+      const res = await fetch(route, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Sync failed");
+      fetchStatus();
+      // Redirect to scan page so the scanner can use the new evidence
+      window.location.href = "/scan?integrationSynced=true";
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sync failed");
+      fetchStatus();
+    } finally {
+      setSyncing(null);
+    }
+  };
+
   const handleScanRepo = async (owner: string, repo: string) => {
     setScanning(true);
-    setScanResult(null);
     setError(null);
     try {
       const res = await fetch("/api/integrations/github/scan", {
@@ -152,8 +176,10 @@ export default function IntegrationsPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Scan failed");
-      setScanResult(data.signals);
-      fetchStatus(); // Refresh status after scan
+      // Repo scanned and evidence stored — redirect to the compliance scan page
+      // so the main scanner can use these signals to answer controls automatically
+      fetchStatus();
+      window.location.href = "/scan?repoScanned=true";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scan failed");
     } finally {
@@ -257,6 +283,15 @@ export default function IntegrationsPage() {
                             {loadingRepos ? "Loading..." : "Select Repo to Scan"}
                           </button>
                         )}
+                        {def.type !== "GITHUB" && (
+                          <button
+                            onClick={() => handleSyncIntegration(def.type)}
+                            disabled={syncing === def.type}
+                            className="px-4 py-2 bg-primary rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                          >
+                            {syncing === def.type ? "Scanning..." : "Scan for Evidence"}
+                          </button>
+                        )}
                         <button
                           onClick={() => handleDisconnect(def.type)}
                           className="px-4 py-2 bg-muted border border-border rounded-lg text-sm text-foreground/80 hover:bg-accent"
@@ -314,7 +349,7 @@ export default function IntegrationsPage() {
                                 <span className="text-xs text-muted-foreground">{repo.language}</span>
                               )}
                               <span className="text-primary text-sm">
-                                {scanning ? "Scanning..." : "Scan →"}
+                                {scanning ? "Indexing..." : "Select & Scan →"}
                               </span>
                             </div>
                           </button>
@@ -324,34 +359,23 @@ export default function IntegrationsPage() {
                   </div>
                 )}
 
-                {/* Scan results */}
-                {def.type === "GITHUB" && scanResult && (
+                {/* Scanning/syncing indicator — briefly shown before redirect */}
+                {def.type === "GITHUB" && scanning && (
                   <div className="mt-4 border-t border-border pt-4">
-                    <h4 className="text-sm font-medium text-green-400 mb-3">
-                      Scan Complete — {(scanResult as Record<string, unknown>).repo as string}
-                    </h4>
-                    <p className="text-foreground/80 text-sm mb-3">
-                      {(scanResult as Record<string, unknown>).summary as string}
+                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                      <span className="animate-pulse">Indexing repository patterns... you'll be redirected to the scan page shortly.</span>
                     </p>
-
-                    <div className="grid grid-cols-3 gap-3">
-                      {(["security", "documentation", "cicd"] as const).map((cat) => {
-                        const catData = (scanResult as Record<string, Record<string, unknown>>)[cat];
-                        const findings = (catData?.findings as string[]) || [];
-                        return (
-                          <div key={cat} className="bg-muted/50 rounded-lg p-3">
-                            <h5 className="text-xs font-medium text-muted-foreground uppercase mb-2">
-                              {cat === "cicd" ? "CI/CD" : cat.charAt(0).toUpperCase() + cat.slice(1)}
-                            </h5>
-                            <p className="text-lg font-bold text-foreground mb-1">{findings.length}</p>
-                            <p className="text-xs text-muted-foreground">findings</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <p className="text-muted-foreground text-xs mt-3">
-                      Findings have been saved as automated evidence and will be used in your next compliance scan and policy generation.
+                  </div>
+                )}
+                {def.type !== "GITHUB" && syncing === def.type && (
+                  <div className="mt-4 border-t border-border pt-4">
+                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                      <span className="animate-pulse">
+                        {def.type === "GOOGLE_WORKSPACE" && "Scanning Google Workspace for access controls, 2FA, audit logs..."}
+                        {def.type === "CUSTOM_WEBHOOK" && "Searching Notion for compliance documents, policies, and procedures..."}
+                        {def.type === "SLACK" && "Scanning Slack for security channels, incident processes, and compliance files..."}
+                        {" "}You'll be redirected to the scan page shortly.
+                      </span>
                     </p>
                   </div>
                 )}

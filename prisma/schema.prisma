@@ -144,6 +144,15 @@ enum VendorRiskLevel {
   LOW
 }
 
+enum DocumentCategory {
+  UPLOAD
+  POLICY
+  SCAN_REPORT
+  AUDIT_REPORT
+  EVIDENCE
+  GENERATED
+}
+
 enum AuditAction {
   CREATED
   UPDATED
@@ -179,6 +188,9 @@ model User {
   name      String?
   avatarUrl String?
   plan      Plan     @default(FREE)
+
+  industry String?
+  role     String?
 
   marketingConsent Boolean   @default(false)
   consentUpdatedAt DateTime?
@@ -238,4 +250,574 @@ model Organization {
   updatedAt DateTime @updatedAt
 
   members               OrgMember[]
-  frameworks            
+  projects              Project[]
+  frameworks            Framework[]
+  scans                 Scan[]
+  risks                 Risk[]
+  policies              Policy[]
+  vendors               Vendor[]
+  integrations          Integration[]
+  subscription          Subscription?
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+  apiKeys               ApiKey[]
+  dataProcessingRecords DataProcessingRecord[]
+
+  @@index([slug])
+  @@index([ownerId])
+}
+
+model Project {
+  id    String @id @default(cuid())
+  orgId String
+
+  name        String
+  description String? @db.Text
+
+  // Questionnaire & classification
+  industry             String?
+  companySize          String?
+  usesAI               Boolean  @default(false)
+  aiDescription        String?  @db.Text
+  dataCategories       String[]
+  productDescription   String?  @db.Text
+  aiPurposes           String[]
+  userTypes            String[]
+  usesThirdPartyAI     Boolean  @default(false)
+  thirdPartyProviders  String[]
+  trainsOwnModels      Boolean  @default(false)
+  hasPrivacyPolicy     Boolean  @default(false)
+
+  riskTier                 String?
+  applicableFrameworks     FrameworkType[]
+  documentChecklist        Json?
+  questionnaireAnswers     Json?
+  questionnaireCompletedAt DateTime?
+
+  complianceScore Int       @default(0)
+  scoreUpdatedAt  DateTime?
+
+  isActive  Boolean  @default(true)
+
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  frameworks Framework[]  @relation("ProjectFrameworks")
+  scans      Scan[]       @relation("ProjectScans")
+  risks      Risk[]       @relation("ProjectRisks")
+  policies   Policy[]     @relation("ProjectPolicies")
+  documents  Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+model Document {
+  id        String @id @default(cuid())
+  projectId String
+
+  title       String
+  description String? @db.Text
+  category    DocumentCategory @default(UPLOAD)
+
+  fileKey  String?
+  fileName String?
+  fileSize Int?
+  mimeType String?
+
+  content     String? @db.Text
+  aiGenerated Boolean @default(false)
+
+  sourceType  String?
+  sourceId    String?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([category])
+}
+
+model OrgMember {
+  id     String  @id @default(cuid())
+  userId String
+  orgId  String
+  role   OrgRole @default(MEMBER)
+
+  invitedEmail String?
+  invitedAt    DateTime?
+  acceptedAt   DateTime?
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+}
+
+model Framework {
+  id     String          @id @default(cuid())
+  orgId  String
+  type   FrameworkType
+  status FrameworkStatus @default(NOT_STARTED)
+
+  score          Int @default(0)
+  totalControls  Int @default(0)
+  passedControls Int @default(0)
+
+  targetDate  DateTime?
+  certifiedAt DateTime?
+  certExpiry  DateTime?
+
+  auditorName  String?
+  auditorFirm  String?
+  auditorEmail String?
+
+  projectId String?
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project?     @relation("ProjectFrameworks", fields: [projectId], references: [id], onDelete: SetNull)
+  controls Control[]
+  scans    Scan[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, type])
+  @@index([orgId])
+  @@index([projectId])
+}
+
+model Control {
+  id          String @id @default(cuid())
+  frameworkId String
+
+  code        String
+  title       String
+  description String          @db.Text
+  guidance    String?         @db.Text
+
+  status   ControlStatus   @default(NOT_STARTED)
+  priority ControlPriority @default(MEDIUM)
+
+  ownerId String?
+  dueDate DateTime?
+
+  mappedControlIds String[]
+
+  automatable   Boolean   @default(false)
+  autoChecked   Boolean   @default(false)
+  lastAutoCheck DateTime?
+
+  framework Framework           @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  evidence  Evidence[]
+  tasks     Task[]
+  comments  Comment[]
+  results   ScanControlResult[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([frameworkId, code])
+  @@index([frameworkId])
+  @@index([status])
+  @@index([code])
+}
+
+model Evidence {
+  id        String @id @default(cuid())
+  controlId String
+
+  title       String
+  description String?        @db.Text
+  type        EvidenceType
+  status      EvidenceStatus @default(PENDING)
+
+  fileKey  String?
+  fileName String?
+  fileSize Int?
+  mimeType String?
+
+  extractedText String? @db.Text
+  textExtractedAt DateTime?
+
+  collectedAt DateTime  @default(now())
+  expiresAt   DateTime?
+
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  reviewNotes String?  @db.Text
+
+  integrationId    String?
+  automatedCheckId String?
+
+  control  Control   @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  comments Comment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([controlId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model Scan {
+  id          String     @id @default(cuid())
+  orgId       String
+  frameworkId String
+
+  status ScanStatus @default(QUEUED)
+
+  evidenceSnapshot Json?
+
+  pendingQuestion    String? @db.Text
+  pendingControlCode String?
+
+  reportJson     Json?
+  shadowPassJson Json?
+
+  riskLevel    String?
+  score        Int?
+
+  startedAt    DateTime?
+  completedAt  DateTime?
+  errorMessage String?   @db.Text
+
+  projectId String?
+
+  org            Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  framework      Framework           @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  project        Project?            @relation("ProjectScans", fields: [projectId], references: [id], onDelete: SetNull)
+  controlResults ScanControlResult[]
+  clarifications ScanClarification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([status])
+}
+
+model ScanControlResult {
+  id        String @id @default(cuid())
+  scanId    String
+  controlId String
+
+  status     ControlResultStatus
+  confidence Float
+
+  evidenceUsed    String[]
+  gaps            String[]
+  remediations    String[]
+  lawyerQuestions String[]
+  note            String?  @db.Text
+
+  inheritedFromScanId String?
+
+  scan    Scan    @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  control Control @relation(fields: [controlId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([scanId, controlId])
+  @@index([scanId])
+}
+
+model ScanClarification {
+  id     String @id @default(cuid())
+  scanId String
+
+  question    String    @db.Text
+  controlCode String?
+  answer      String?   @db.Text
+  answeredAt  DateTime?
+
+  scan Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([scanId])
+}
+
+model Risk {
+  id    String @id @default(cuid())
+  orgId String
+
+  title       String
+  description String @db.Text
+  category    String
+
+  likelihood Int
+  impact     Int
+  riskScore  Int
+  level      RiskLevel
+
+  residualLikelihood Int?
+  residualImpact     Int?
+  residualScore      Int?
+  residualLevel      RiskLevel?
+
+  status  RiskStatus @default(OPEN)
+  ownerId String?
+
+  treatmentPlan String?   @db.Text
+  treatmentDue  DateTime?
+
+  relatedControlIds String[]
+
+  projectId String?
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project?     @relation("ProjectRisks", fields: [projectId], references: [id], onDelete: SetNull)
+  comments Comment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([level])
+}
+
+model Policy {
+  id    String       @id @default(cuid())
+  orgId String
+
+  title   String
+  version String       @default("1.0")
+  status  PolicyStatus @default(DRAFT)
+
+  content     Json?
+  contentText String? @db.Text
+
+  applicableFrameworks FrameworkType[]
+
+  approvedBy   String?
+  approvedAt   DateTime?
+  nextReviewAt DateTime?
+
+  aiGenerated  Boolean @default(false)
+  aiPromptUsed String? @db.Text
+
+  projectId String?
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project?     @relation("ProjectPolicies", fields: [projectId], references: [id], onDelete: SetNull)
+  comments Comment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([projectId])
+}
+
+model Vendor {
+  id    String @id @default(cuid())
+  orgId String
+
+  name        String
+  website     String?
+  description String? @db.Text
+  category    String
+  country     String?
+
+  isDataProcessor   Boolean @default(false)
+  dpAgreementSigned Boolean @default(false)
+  dpAgreementUrl    String?
+
+  riskLevel    VendorRiskLevel @default(MEDIUM)
+  lastAssessed DateTime?
+  nextReview   DateTime?
+
+  certifications String[]
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  comments Comment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+model Integration {
+  id    String @id @default(cuid())
+  orgId String
+
+  type   IntegrationType
+  name   String
+  status IntegrationStatus @default(DISCONNECTED)
+
+  encryptedConfig String? @db.Text
+
+  lastSyncAt    DateTime?
+  lastSyncError String?   @db.Text
+  nextSyncAt    DateTime?
+  itemsSynced   Int       @default(0)
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, type])
+  @@index([orgId])
+}
+
+model Subscription {
+  id    String @id @default(cuid())
+  orgId String @unique
+
+  stripeCustomerId     String  @unique
+  stripeSubscriptionId String? @unique
+  stripePriceId        String?
+
+  plan   Plan               @default(FREE)
+  status SubscriptionStatus @default(ACTIVE)
+
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean   @default(false)
+  canceledAt         DateTime?
+  trialEnd           DateTime?
+
+  taxId         String?
+  taxIdVerified Boolean @default(false)
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Task {
+  id        String @id @default(cuid())
+  controlId String
+
+  title       String
+  description String?   @db.Text
+  assigneeId  String?
+  dueDate     DateTime?
+  completedAt DateTime?
+
+  control Control @relation(fields: [controlId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([controlId])
+}
+
+model Comment {
+  id       String @id @default(cuid())
+  authorId String
+  content  String @db.Text
+
+  controlId  String?
+  evidenceId String?
+  riskId     String?
+  policyId   String?
+  vendorId   String?
+
+  control  Control?  @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  evidence Evidence? @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  risk     Risk?     @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  policy   Policy?   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  vendor   Vendor?   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id     String  @id @default(cuid())
+  orgId  String
+  userId String?
+
+  action     AuditAction
+  resource   String
+  resourceId String?
+  before     Json?
+  after      Json?
+
+  ipAddress String?
+  userAgent String?
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User?        @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([orgId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id     String @id @default(cuid())
+  orgId  String
+  userId String
+
+  type   String
+  title  String
+  body   String
+  url    String?
+  read   Boolean   @default(false)
+  readAt DateTime?
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}
+
+model ApiKey {
+  id    String @id @default(cuid())
+  orgId String
+
+  name       String
+  keyHash    String   @unique
+  keyPrefix  String
+  scopes     String[]
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([orgId])
+  @@index([keyHash])
+}
+
+model DataProcessingRecord {
+  id    String @id @default(cuid())
+  orgId String
+
+  purposeOfProcessing       String  @db.Text
+  categoriesOfDataSubjects  String  @db.Text
+  categoriesOfData          String  @db.Text
+  recipients                String? @db.Text
+  transfersToThirdCountries String? @db.Text
+  retentionPeriod           String?
+  technicalMeasures         String? @db.Text
+  legalBasis                String
+  dataController            String
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+}

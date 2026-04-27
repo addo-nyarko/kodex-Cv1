@@ -6,6 +6,42 @@ function hasDoc(ev: EvidencePool, ...keywords: string[]): boolean {
   );
 }
 
+/** Check if GitHub code signals contain a specific capability */
+function hasGitSignal(ev: EvidencePool, key: string): boolean {
+  const gh = ev.codeSignals?.github as Record<string, unknown> | undefined;
+  if (!gh) return false;
+  return !!gh[key];
+}
+
+/** Get GitHub findings matching keywords */
+function gitFindingsMatch(ev: EvidencePool, ...keywords: string[]): boolean {
+  const gh = ev.codeSignals?.github as Record<string, unknown> | undefined;
+  if (!gh) return false;
+  const findings = (gh.allFindings as string[]) ?? [];
+  return findings.some((f) => keywords.some((kw) => f.toLowerCase().includes(kw.toLowerCase())));
+}
+
+/** Check Google Workspace signal */
+function hasGWSSignal(ev: EvidencePool, key: string): boolean {
+  const gws = ev.codeSignals?.googleWorkspace as Record<string, unknown> | undefined;
+  if (!gws) return false;
+  return !!gws[key];
+}
+
+/** Check Slack signal */
+function hasSlackSignal(ev: EvidencePool, key: string): boolean {
+  const slack = ev.codeSignals?.slack as Record<string, unknown> | undefined;
+  if (!slack) return false;
+  return !!slack[key];
+}
+
+/** Check Notion signal */
+function hasNotionSignal(ev: EvidencePool, key: string): boolean {
+  const notion = ev.codeSignals?.notion as Record<string, unknown> | undefined;
+  if (!notion) return false;
+  return !!notion[key];
+}
+
 function isHighRiskProcessing(ev: EvidencePool): boolean {
   const highRiskCategories = ["health", "financial", "biometric", "children"];
   return (
@@ -44,22 +80,36 @@ export const gdprRules: ControlRule[] = [
     evidenceKeys: ["privacy_policy", "privacy_notice"],
     articleRefs: { GDPR: "Art. 13-14" },
     check: (ev) => {
-      const hasPrivacyPolicy = hasDoc(ev, "privacy policy", "privacy notice", "data protection notice");
+      const hasPolicy = hasDoc(ev, "privacy policy", "privacy notice", "data protection notice");
       const hasContactInfo = hasDoc(ev, "dpo", "data protection officer", "contact us");
+      // GitHub: check if repo has a privacy policy file
+      const repoHasPrivacy = hasGitSignal(ev, "hasPrivacyPolicy");
+      // Notion: check if workspace has a privacy policy
+      const notionHasPrivacy = hasNotionSignal(ev, "hasPrivacyPolicy");
+
+      const anyPolicy = hasPolicy || repoHasPrivacy || notionHasPrivacy;
+      const sources = [
+        ...(hasPolicy ? ["privacy_policy"] : []),
+        ...(repoHasPrivacy ? ["GitHub repo (privacy policy file detected)"] : []),
+        ...(notionHasPrivacy ? ["Notion workspace (privacy policy found)"] : []),
+      ];
+
       return {
-        status: hasPrivacyPolicy ? (hasContactInfo ? "PASS" : "PARTIAL") : "NO_EVIDENCE",
-        confidence: hasPrivacyPolicy && hasContactInfo ? 0.9 : hasPrivacyPolicy ? 0.65 : 0.15,
-        evidenceUsed: hasPrivacyPolicy ? ["privacy_policy"] : [],
+        status: anyPolicy ? (hasContactInfo ? "PASS" : "PARTIAL") : "NO_EVIDENCE",
+        confidence: anyPolicy && hasContactInfo ? 0.9 : anyPolicy ? 0.65 : 0.15,
+        evidenceUsed: sources,
         gaps: [
-          ...(!hasPrivacyPolicy ? ["No privacy notice found"] : []),
+          ...(!anyPolicy ? ["No privacy notice found in documents or code repository"] : []),
           ...(!hasContactInfo ? ["Privacy notice may lack DPO/controller contact details required by Art. 13(1)(a)"] : []),
         ],
         remediations: [
-          ...(!hasPrivacyPolicy ? ["Publish a GDPR-compliant privacy notice covering all Art. 13 information requirements"] : []),
+          ...(!anyPolicy ? ["Publish a GDPR-compliant privacy notice covering all Art. 13 information requirements"] : []),
           ...(!hasContactInfo ? ["Add controller identity and contact details, and DPO contact if applicable"] : []),
         ],
         lawyerQuestions: ["Does our privacy notice satisfy both Art. 13 (data collected directly) and Art. 14 (data from third parties) requirements?"],
-        note: "Arts. 13-14 require clear transparency notices at collection point.",
+        note: anyPolicy
+          ? `Privacy notice found${repoHasPrivacy ? " (detected in GitHub repo)" : ""}.`
+          : "Arts. 13-14 require clear transparency notices at collection point.",
       };
     },
   },
@@ -72,14 +122,24 @@ export const gdprRules: ControlRule[] = [
     articleRefs: { GDPR: "Art. 30" },
     check: (ev) => {
       const hasRopa = hasDoc(ev, "record of processing", "ropa", "processing activities", "article 30");
+      const notionHasRopa = hasNotionSignal(ev, "hasRoPA");
+      const anyRopa = hasRopa || notionHasRopa;
+
+      const sources = [
+        ...(hasRopa ? ["ropa"] : []),
+        ...(notionHasRopa ? ["Notion: record of processing activities"] : []),
+      ];
+
       return {
-        status: hasRopa ? "PASS" : "NO_EVIDENCE",
-        confidence: hasRopa ? 0.85 : 0.2,
-        evidenceUsed: hasRopa ? ["ropa"] : [],
-        gaps: hasRopa ? [] : ["No Record of Processing Activities (RoPA) found"],
-        remediations: hasRopa ? [] : ["Create and maintain an Art. 30 RoPA listing all processing activities, their purposes, legal bases, data categories, retention periods, and technical measures"],
+        status: anyRopa ? "PASS" : "NO_EVIDENCE",
+        confidence: anyRopa ? 0.85 : 0.2,
+        evidenceUsed: sources,
+        gaps: anyRopa ? [] : ["No Record of Processing Activities (RoPA) found"],
+        remediations: anyRopa ? [] : ["Create and maintain an Art. 30 RoPA listing all processing activities, their purposes, legal bases, data categories, retention periods, and technical measures"],
         lawyerQuestions: ["Are we exempt from Art. 30 obligations given our size, or must we maintain a full RoPA?"],
-        note: "Art. 30 RoPA is mandatory for most organisations processing EU personal data.",
+        note: anyRopa
+          ? `RoPA found${notionHasRopa ? " in Notion workspace" : ""}.`
+          : "Art. 30 RoPA is mandatory for most organisations processing EU personal data.",
       };
     },
   },
@@ -144,15 +204,150 @@ export const gdprRules: ControlRule[] = [
     evidenceKeys: ["breach_procedure", "incident_response"],
     articleRefs: { GDPR: "Arts. 33-34" },
     check: (ev) => {
-      const hasBreachProc = hasDoc(ev, "data breach", "breach notification", "incident response", "security incident");
+      const hasBreachDoc = hasDoc(ev, "data breach", "breach notification", "incident response", "security incident");
+      // GitHub: check if repo has a SECURITY.md (vulnerability disclosure policy)
+      const repoHasSecurityMd = hasGitSignal(ev, "hasSecurityMd");
+      // Slack: check for dedicated incident response channel
+      const slackHasIncident = hasSlackSignal(ev, "hasIncidentChannel");
+      const slackActiveProcess = hasSlackSignal(ev, "hasActiveIncidentProcess");
+      // Notion: check for incident response documentation
+      const notionHasIR = hasNotionSignal(ev, "hasIncidentResponse");
+
+      const hasEvidence = hasBreachDoc || repoHasSecurityMd || slackHasIncident || notionHasIR;
+      const hasStrongEvidence = hasBreachDoc || notionHasIR || (repoHasSecurityMd && slackHasIncident);
+
+      const sources = [
+        ...(hasBreachDoc ? ["breach_procedure"] : []),
+        ...(repoHasSecurityMd ? ["GitHub repo (SECURITY.md detected)"] : []),
+        ...(slackHasIncident ? ["Slack: #incident channel"] : []),
+        ...(slackActiveProcess ? ["Slack: active incident process"] : []),
+        ...(notionHasIR ? ["Notion: incident response plan"] : []),
+      ];
+
+      const getConfidence = () => {
+        if (hasStrongEvidence) return 0.85;
+        if (notionHasIR || hasBreachDoc) return 0.8;
+        if (repoHasSecurityMd && slackHasIncident) return 0.7;
+        if (slackHasIncident || repoHasSecurityMd) return 0.55;
+        return 0.2;
+      };
+
       return {
-        status: hasBreachProc ? "PASS" : "NO_EVIDENCE",
-        confidence: hasBreachProc ? 0.85 : 0.2,
-        evidenceUsed: hasBreachProc ? ["breach_procedure"] : [],
-        gaps: hasBreachProc ? [] : ["No data breach notification procedure documented"],
-        remediations: hasBreachProc ? [] : ["Create a breach response plan covering: detection, 72-hour supervisory authority notification (Art. 33), and high-risk subject notification (Art. 34)"],
+        status: hasStrongEvidence ? "PASS" : hasEvidence ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: getConfidence(),
+        evidenceUsed: sources,
+        gaps: hasStrongEvidence
+          ? []
+          : hasEvidence
+            ? ["Partial incident handling evidence found but a formal breach notification procedure should be documented"]
+            : ["No data breach notification procedure documented"],
+        remediations: hasStrongEvidence
+          ? []
+          : ["Create a breach response plan covering: detection, 72-hour supervisory authority notification (Art. 33), and high-risk subject notification (Art. 34)"],
         lawyerQuestions: ["At what threshold does a breach require notification to data subjects under Art. 34, and who is our designated point of contact for the supervisory authority?"],
-        note: "Art. 33 requires 72-hour breach notification to supervisory authority.",
+        note: hasEvidence
+          ? `Breach/incident handling evidence found from ${sources.length} source(s): ${sources.join(", ")}.`
+          : "Art. 33 requires 72-hour breach notification to supervisory authority.",
+      };
+    },
+  },
+  {
+    id: "GDPR_007_security_measures",
+    code: "GDPR-Art32",
+    title: "Appropriate technical and organisational security measures",
+    frameworks: ["GDPR"],
+    evidenceKeys: ["security_policy", "encryption", "access_control"],
+    articleRefs: { GDPR: "Art. 32" },
+    check: (ev) => {
+      const hasSecDoc = hasDoc(ev, "security policy", "security measures", "information security", "encryption", "access control");
+
+      // GitHub: check for concrete security implementation signals
+      const hasAuth = hasGitSignal(ev, "hasAuth");
+      const hasEncryption = hasGitSignal(ev, "hasEncryption");
+      const hasValidation = hasGitSignal(ev, "hasInputValidation");
+      const hasLogging = hasGitSignal(ev, "hasLogging");
+      const hasCI = hasGitSignal(ev, "hasCI");
+      const hasTests = hasGitSignal(ev, "hasTests");
+      const hasBranchProt = hasGitSignal(ev, "hasBranchProtection");
+
+      // Google Workspace: access control signals
+      const has2FA = hasGWSSignal(ev, "has2FAEnforced");
+      const hasLoginMonitoring = hasGWSSignal(ev, "hasLoginMonitoring");
+
+      // Slack: organizational security signals
+      const hasSecurityChannel = hasSlackSignal(ev, "hasSecurityChannel");
+
+      // Notion: security policy document
+      const notionHasSecPolicy = hasNotionSignal(ev, "hasSecurityPolicy");
+
+      const codeSecurityCount = [hasAuth, hasEncryption, hasValidation, hasLogging, hasCI, hasTests, hasBranchProt, has2FA, hasLoginMonitoring, hasSecurityChannel, notionHasSecPolicy]
+        .filter(Boolean).length;
+      const hasStrongCodeSecurity = codeSecurityCount >= 3;
+
+      const sources: string[] = [];
+      if (hasSecDoc) sources.push("security_policy");
+      if (hasAuth) sources.push("GitHub: authentication middleware");
+      if (hasEncryption) sources.push("GitHub: encryption/hashing");
+      if (hasValidation) sources.push("GitHub: input validation");
+      if (hasLogging) sources.push("GitHub: logging/monitoring");
+      if (hasCI) sources.push("GitHub: CI/CD pipeline");
+      if (hasTests) sources.push("GitHub: automated tests");
+      if (hasBranchProt) sources.push("GitHub: branch protection");
+      if (has2FA) sources.push("Google Workspace: 2FA enforced");
+      if (hasLoginMonitoring) sources.push("Google Workspace: login monitoring");
+      if (hasSecurityChannel) sources.push("Slack: dedicated security channel");
+      if (notionHasSecPolicy) sources.push("Notion: security policy document");
+
+      const gaps: string[] = [];
+      if (!hasSecDoc && !notionHasSecPolicy && !hasStrongCodeSecurity) gaps.push("No security policy document and limited code-level security measures");
+      if (!hasEncryption) gaps.push("No encryption implementation detected");
+      if (!hasAuth && !has2FA) gaps.push("No authentication/2FA measures detected");
+      if (!hasLogging && !hasLoginMonitoring) gaps.push("No logging/monitoring detected");
+
+      if (hasSecDoc && hasStrongCodeSecurity) {
+        return {
+          status: "PASS",
+          confidence: 0.9,
+          evidenceUsed: sources,
+          gaps: [],
+          remediations: [],
+          lawyerQuestions: [],
+          note: `Strong Art. 32 compliance: security policy documented and ${codeSecurityCount} technical measures verified in codebase.`,
+        };
+      }
+      if (hasStrongCodeSecurity) {
+        return {
+          status: "PARTIAL",
+          confidence: 0.7,
+          evidenceUsed: sources,
+          gaps: ["Technical measures found in code but no formal security policy document"],
+          remediations: ["Document your existing security measures in a formal information security policy"],
+          lawyerQuestions: ["Does our technical security posture satisfy Art. 32's 'appropriate' standard given our data types and processing volume?"],
+          note: `${codeSecurityCount} security measures verified in codebase. Formal policy document would complete Art. 32 compliance.`,
+        };
+      }
+      if (hasSecDoc) {
+        return {
+          status: "PARTIAL",
+          confidence: 0.65,
+          evidenceUsed: sources,
+          gaps: codeSecurityCount === 0 ? ["Security policy exists but no implementation verified in code"] : gaps,
+          remediations: ["Ensure documented security measures are actually implemented in code"],
+          lawyerQuestions: [],
+          note: "Security policy documented but limited implementation evidence from code scan.",
+        };
+      }
+
+      return {
+        status: codeSecurityCount > 0 ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: codeSecurityCount > 0 ? 0.4 : 0.15,
+        evidenceUsed: sources,
+        gaps: gaps.length > 0 ? gaps : ["No security measures documented or detected"],
+        remediations: ["Implement and document appropriate technical measures: encryption at rest and in transit, access controls, logging, input validation, and automated testing"],
+        lawyerQuestions: ["What constitutes 'appropriate' technical and organisational measures under Art. 32 for our size and data sensitivity?"],
+        note: codeSecurityCount > 0
+          ? `Only ${codeSecurityCount} technical measure(s) detected. Art. 32 requires comprehensive security.`
+          : "Art. 32 requires appropriate technical and organisational security measures.",
       };
     },
   },

@@ -2,67 +2,65 @@ import { getSession } from "@/lib/auth-helper";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { slugify } from "@/lib/utils";
 
 const OnboardingSchema = z.object({
   name: z.string().min(1),
   industry: z.string().min(1),
+  role: z.string().optional(),
   country: z.string().default("DE"),
   size: z.string().default("1-10"),
-  usesAI: z.boolean().default(false),
-  aiDescription: z.string().optional(),
-  dataCategories: z.array(z.string()).default([]),
 });
 
 export async function POST(req: NextRequest) {
-  const session = await getSession();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const { userId } = session;
+  try {
+    const session = await getSession();
+    if (!session) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-  const body = OnboardingSchema.safeParse(await req.json());
-  if (!body.success) return Response.json({ error: "Invalid input" }, { status: 422 });
+    const { userId, orgId } = session;
 
-  const user = await db.user.findUnique({ where: { id: userId } });
-  if (!user) return Response.json({ error: "User not found" }, { status: 404 });
+    const raw = await req.json();
+    const body = OnboardingSchema.safeParse(raw);
+    if (!body.success) {
+      return Response.json(
+        { error: "Invalid input", details: body.error.flatten() },
+        { status: 422 }
+      );
+    }
 
-  const { name, industry, country, size, usesAI, aiDescription, dataCategories } = body.data;
+    const { name, industry, role, country, size } = body.data;
 
-  const baseSlug = slugify(name);
-  let slug = baseSlug;
-  let attempt = 0;
-  while (await db.organization.findUnique({ where: { slug } })) {
-    attempt++;
-    slug = `${baseSlug}-${attempt}`;
+    // Update user with industry and role
+    await db.user.update({
+      where: { id: userId },
+      data: {
+        industry,
+        role: role ?? null,
+        onboardingComplete: true,
+      },
+    });
+
+    // Update the existing org (getSession already created one)
+    const org = await db.organization.update({
+      where: { id: orgId },
+      data: {
+        name,
+        industry,
+        country,
+        size,
+      },
+    });
+
+    return Response.json({ orgId: org.id, slug: org.slug });
+  } catch (error) {
+    console.error("Onboarding error:", error);
+    return Response.json(
+      {
+        error: "Internal server error",
+        message: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
   }
-
-  const org = await db.organization.upsert({
-    where: { slug },
-    create: {
-      name,
-      slug,
-      industry,
-      country,
-      size,
-      usesAI,
-      aiDescription,
-      dataCategories,
-      ownerId: user.id,
-    },
-    update: {
-      name,
-      industry,
-      country,
-      size,
-      usesAI,
-      aiDescription,
-      dataCategories,
-    },
-  });
-
-  await db.user.update({
-    where: { id: user.id },
-    data: { onboardingComplete: true },
-  });
-
-  return Response.json({ orgId: org.id, slug: org.slug });
 }

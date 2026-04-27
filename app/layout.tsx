@@ -15,28 +15,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
-        <head>
-          {/* Prevent flash of wrong theme */}
-          <script
-            dangerouslySetInnerHTML={{
-              __html: `
-                (function() {
-                  try {
-                    var theme = localStorage.getItem('kodex-theme') || 'dark';
-                    if (theme === 'system') {
-                      theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-                    }
-                    document.documentElement.classList.add(theme);
-                  } catch(e) {
-                    document.documentElement.classList.add('dark');
-                  }
-                })();
-              `,
-            }}
-          />
-        </head>
         <body className={`${inter.className} bg-background text-foreground antialiased`}>
-          <ThemeProvider defaultTheme="dark">
+          <ThemeProvider>
             {children}
           </ThemeProvider>
         </body>

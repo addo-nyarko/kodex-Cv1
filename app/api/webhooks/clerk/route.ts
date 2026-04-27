@@ -46,10 +46,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (event.type === "user.deleted") {
-    await db.user.updateMany({
-      where: { clerkId: event.data.id as string },
-      data: { deletedAt: new Date() },
-    });
+    const clerkId = event.data.id as string;
+    const user = await db.user.findUnique({ where: { clerkId } });
+
+    if (user) {
+      // Delete all orgs owned by this user (cascades to everything else)
+      await db.organization.deleteMany({ where: { ownerId: user.id } });
+      // Delete the user
+      await db.user.delete({ where: { id: user.id } });
+    }
   }
 
   return Response.json({ received: true });

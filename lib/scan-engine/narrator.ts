@@ -18,9 +18,13 @@ export async function narrateEvent(input: NarrationInput): Promise<string> {
     model: AI_MODELS.FAST,
     max_tokens: 150,
     system:
-      "You are the Kodex compliance scanner. Narrate scan progress in a friendly, " +
-      "conversational tone — like a knowledgeable colleague walking someone through " +
-      "a compliance review. Be concise (1-2 sentences max). No jargon.",
+      "You are the Kodex compliance scanner narrating your work in real time. " +
+      "Write like you're thinking out loud — transparent and conversational. " +
+      "Be concise (1-2 sentences max). No jargon. " +
+      "Show your reasoning briefly: what you looked at, what you found, and what it means. " +
+      'Examples of good tone: "Found encryption libraries in the codebase — that covers the data protection requirement.", ' +
+      '"No privacy policy detected in the repo, so I\'ll mark this as a gap.", ' +
+      '"Your CI/CD is solid — tests and branch protection are both in place."',
     messages: [{ role: "user", content: prompt }],
   });
 
@@ -28,13 +32,16 @@ export async function narrateEvent(input: NarrationInput): Promise<string> {
 }
 
 function buildPrompt(input: NarrationInput): string {
+  const hasGitHub = input.evidence?.codeSignals?.github ? true : false;
+  const sourcesHint = hasGitHub ? " I'm using both uploaded documents and GitHub repo scan data." : "";
+
   switch (input.type) {
     case "control_evaluated":
-      return `Control "${input.controlTitle}" (${input.controlCode}) evaluated with status: ${input.result?.status}. Confidence: ${Math.round((input.result?.confidence ?? 0) * 100)}%. Note: ${input.result?.note}. Narrate this finding naturally.`;
+      return `I just evaluated control "${input.controlTitle}" (${input.controlCode}). Status: ${input.result?.status}. Confidence: ${Math.round((input.result?.confidence ?? 0) * 100)}%. Note: ${input.result?.note}.${sourcesHint} Narrate this finding like you're thinking out loud — what did you check and what did you find?`;
     case "cross_framework_hit":
-      return `While scanning, we found that ${input.shadowResult?.met} of ${input.shadowResult?.total} ${input.framework} controls are already satisfied. Narrate this cross-framework discovery with excitement.`;
+      return `While scanning, I found that ${input.shadowResult?.met} of ${input.shadowResult?.total} ${input.framework} controls are already satisfied by the same evidence. Narrate this cross-framework discovery briefly.`;
     case "scan_start":
-      return `Starting a compliance scan. Company uses AI: ${input.evidence?.onboarding.usesAI}. Industry: ${input.evidence?.onboarding.industry}. Greet the user and set expectations.`;
+      return `Starting a compliance scan. Company uses AI: ${input.evidence?.onboarding.usesAI}. Industry: ${input.evidence?.onboarding.industry}.${sourcesHint} Greet the user briefly and set expectations for what you'll be checking.`;
     case "scan_complete":
       return `Scan complete. Narrate completion in one encouraging sentence.`;
     default:

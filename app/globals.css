@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
-/* ── Design System Tokens (Figma) ────────────────────────────── */
+@custom-variant dark (&:is(.dark *));
+
+/* ── Design System Tokens ────────────────────────────── */
 
 :root {
   --font-size: 16px;
@@ -41,52 +43,43 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
-
-  /* Blue accent for branding */
-  --blue: #2563eb;
-  --blue-hover: #1d4ed8;
-  --blue-light: rgba(37, 99, 235, 0.1);
-  --blue-foreground: #ffffff;
 }
 
 .dark {
-  --background: #080c16;
-  --foreground: #e2e8f0;
-  --card: #0d1525;
-  --card-foreground: #e2e8f0;
-  --popover: #0d1525;
-  --popover-foreground: #e2e8f0;
-  --primary: #e2e8f0;
-  --primary-foreground: #080c16;
-  --secondary: #131d30;
-  --secondary-foreground: #e2e8f0;
-  --muted: #131d30;
-  --muted-foreground: #64748b;
-  --accent: #131d30;
-  --accent-foreground: #e2e8f0;
-  --destructive: #ef4444;
-  --destructive-foreground: #fca5a5;
-  --border: #1a2540;
-  --input: #131d30;
-  --ring: #334155;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: #060a12;
-  --sidebar-foreground: #e2e8f0;
-  --sidebar-primary: #3b82f6;
-  --sidebar-primary-foreground: #e2e8f0;
-  --sidebar-accent: #131d30;
-  --sidebar-accent-foreground: #e2e8f0;
-  --sidebar-border: #1a2540;
-  --sidebar-ring: #334155;
-
-  --blue: #3b82f6;
-  --blue-hover: #2563eb;
-  --blue-light: rgba(59, 130, 246, 0.1);
-  --blue-foreground: #ffffff;
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.439 0 0);
 }
 
 @theme inline {
@@ -108,6 +101,8 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -126,15 +121,11 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
-  --color-blue: var(--blue);
-  --color-blue-hover: var(--blue-hover);
-  --color-blue-light: var(--blue-light);
-  --color-blue-foreground: var(--blue-foreground);
   --font-sans: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-/* ── Base Layer ────────────────────────────────────────────────── */
+/* ── Base Layer ────────────────────────────────────────── */
 
 @layer base {
   * {
@@ -192,74 +183,8 @@
   }
 }
 
-/* ── Scrollbar ────────────────────────────────────────────────── */
+/* ── Scrollbar ────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--muted-foreground); border-radius: 999px; opacity: 0.3; }
 ::-webkit-scrollbar-thumb:hover { opacity: 0.5; }
-
-/* ── Animations ──────────────────────────────────────────────── */
-
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes fade-in-scale {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes spin-slow {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@keyframes spin-slow-reverse {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(-360deg); }
-}
-
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.3; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.15); }
-}
-
-@keyframes float-up {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.animate-fade-in { animation: fade-in 0.5s ease-out forwards; }
-.animate-fade-in-delay-1 { animation: fade-in 0.5s ease-out 0.1s forwards; opacity: 0; }
-.animate-fade-in-delay-2 { animation: fade-in 0.5s ease-out 0.2s forwards; opacity: 0; }
-.animate-fade-in-delay-3 { animation: fade-in 0.5s ease-out 0.3s forwards; opacity: 0; }
-.animate-fade-in-delay-4 { animation: fade-in 0.5s ease-out 0.4s forwards; opacity: 0; }
-.animate-fade-in-delay-5 { animation: fade-in 0.5s ease-out 0.5s forwards; opacity: 0; }
-.animate-fade-in-scale { animation: fade-in-scale 0.3s ease-out forwards; }
-.animate-spin-slow { animation: spin-slow 30s linear infinite; }
-.animate-spin-slow-reverse { animation: spin-slow-reverse 35s linear infinite; }
-.animate-pulse-glow { animation: pulse-glow 8s ease-in-out infinite; }
-.animate-float-up { animation: float-up 0.6s ease-out forwards; }
-
-/* Staggered card animations */
-.stagger-1 { animation-delay: 0.05s; }
-.stagger-2 { animation-delay: 0.1s; }
-.stagger-3 { animation-delay: 0.15s; }
-.stagger-4 { animation-delay: 0.2s; }
-.stagger-5 { animation-delay: 0.25s; }
-.stagger-6 { animation-delay: 0.3s; }
-.stagger-7 { animation-delay: 0.35s; }
-.stagger-8 { animation-delay: 0.4s; }
-
-/* Hover lift effect */
-.hover-lift {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-.hover-lift:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.1), 0 4px 10px -5px rgba(0, 0, 0, 0.04);
-}
-.dark .hover-lift:hover {
-  box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.3), 0 4px 10px -5px rgba(0, 0, 0, 0.2);
-}
