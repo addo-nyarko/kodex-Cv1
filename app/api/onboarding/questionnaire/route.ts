@@ -91,6 +91,7 @@ export async function POST(req: NextRequest) {
             frameworkId: framework.id,
             code: rule.code,
             title: rule.title,
+            description: rule.title,
             status: "NOT_STARTED",
           },
           update: {},
