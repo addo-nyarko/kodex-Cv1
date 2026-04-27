@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
       const scan = await db.scan.findFirst({
         where: { id: scanId, orgId },
         include: {
-          framework: { select: { type: true, name: true } },
+          framework: { select: { type: true } },
           controlResults: { select: { controlCode: true, status: true, confidence: true } },
           clarifications: { select: { question: true, answer: true, controlCode: true } },
         },
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 
         scanContext = `\n\nACTIVE SCAN CONTEXT:
 - Scan ID: ${scan.id}
-- Framework: ${scan.framework?.name ?? scan.framework?.type ?? "Unknown"}
+- Framework: ${scan.framework?.type ?? "Unknown"}
 - Status: ${scan.status}
 - Controls evaluated so far: ${completedControls} (${passedControls} passed)
 ${scan.pendingQuestion ? `- PENDING QUESTION (control ${scan.pendingControlCode}): ${scan.pendingQuestion}` : ""}
