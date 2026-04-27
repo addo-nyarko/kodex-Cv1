@@ -22,8 +22,8 @@ export async function POST(req: NextRequest) {
         where: { id: scanId, orgId },
         include: {
           framework: { select: { type: true } },
-          controlResults: { select: { controlCode: true, status: true, confidence: true } },
-          clarifications: { select: { question: true, answer: true, controlCode: true } },
+          controlResults: { include: { control: { select: { code: true } } } },
+          clarifications: true,
         },
       });
       if (scan) {
