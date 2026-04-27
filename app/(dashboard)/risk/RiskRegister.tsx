@@ -37,7 +37,10 @@ export default async function RiskRegister() {
   if (!session) redirect("/sign-in");
   const { orgId } = session;
 
-  const risks = await db.risk.findMany({
+  const risks: Array<{
+    id: string; title: string; description: string; category: string;
+    level: string; riskScore: number; status: string; treatmentPlan: string | null;
+  }> = await db.risk.findMany({
     where: { orgId },
     orderBy: { riskScore: "desc" },
   });
