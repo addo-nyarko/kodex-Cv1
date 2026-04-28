@@ -121,6 +121,11 @@ function getBaseUrl(): string {
   if (process.env.NEXT_PUBLIC_APP_URL) {
     return process.env.NEXT_PUBLIC_APP_URL;
   }
-  // Fallback for local dev
-  return "http://localhost:3000";
+  // Local dev fallback — never reached in production
+  if (process.env.NODE_ENV === "development") {
+    return "http://localhost:3000";
+  }
+  throw new Error(
+    "Cannot determine base URL for QStash callback. Set NEXT_PUBLIC_APP_URL in Vercel environment variables."
+  );
 }

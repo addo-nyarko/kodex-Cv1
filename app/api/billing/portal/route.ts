@@ -12,7 +12,8 @@ export async function POST() {
     return Response.json({ error: "No billing account found" }, { status: 404 });
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl) return Response.json({ error: "Server misconfigured: NEXT_PUBLIC_APP_URL not set" }, { status: 500 });
 
   const portalSession = await stripe.billingPortal.sessions.create({
     customer: subscription.stripeCustomerId,

@@ -35,7 +35,8 @@ export async function POST(req: NextRequest) {
     customerId = customer.id;
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl) return Response.json({ error: "Server misconfigured: NEXT_PUBLIC_APP_URL not set" }, { status: 500 });
 
   const checkoutSession = await stripe.checkout.sessions.create({
     customer: customerId,
