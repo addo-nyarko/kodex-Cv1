@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 
-// DEV ONLY — wipes all user data so you can start fresh after clearing Clerk
+// DEV ONLY — wipes all user data so you can start fresh (e.g. after clearing Supabase auth users)
 export async function POST() {
   if (process.env.NODE_ENV === "production") {
     return Response.json({ error: "Not available in production" }, { status: 403 });

@@ -1,40 +1,35 @@
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { createClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
 import { slugify } from "@/lib/utils";
+import type { OrgRole } from "@prisma/client";
 
 export type SessionContext = {
-  clerkUserId: string;
+  authUserId: string;
   userId: string;
   orgId: string;
   email: string;
-  role: "OWNER" | "ADMIN" | "MEMBER" | "VIEWER" | "AUDITOR";
+  role: OrgRole;
 };
 
 export async function getSession(): Promise<SessionContext | null> {
-  const { userId: clerkUserId } = await auth();
-  if (!clerkUserId) return null;
+  const supabase = await createClient();
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser();
+  if (!authUser?.email) return null;
 
-  let user = await db.user.findUnique({ where: { clerkId: clerkUserId } });
+  // Find or JIT-create the User row, keyed on email.
+  let user = await db.user.findUnique({ where: { email: authUser.email } });
 
   if (!user) {
-    const clerk = await clerkClient();
-    const clerkUser = await clerk.users.getUser(clerkUserId);
-    const email = clerkUser.emailAddresses[0]?.emailAddress ?? `${clerkUserId}@placeholder.local`;
-    const name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") || null;
-
-    const existingByEmail = await db.user.findUnique({ where: { email } });
-    if (existingByEmail) {
-      user = await db.user.update({
-        where: { id: existingByEmail.id },
-        data: { clerkId: clerkUserId, name, avatarUrl: clerkUser.imageUrl },
-      });
-    } else {
-      user = await db.user.create({
-        data: { clerkId: clerkUserId, email, name, avatarUrl: clerkUser.imageUrl },
-      });
-    }
+    const name = (authUser.user_metadata?.full_name as string | undefined) ?? null;
+    const avatarUrl = (authUser.user_metadata?.avatar_url as string | undefined) ?? null;
+    user = await db.user.create({
+      data: { email: authUser.email, name, avatarUrl },
+    });
   }
 
+  // Find or JIT-create the user's personal organization.
   let org = await db.organization.findFirst({ where: { ownerId: user.id } });
 
   if (!org) {
@@ -58,7 +53,7 @@ export async function getSession(): Promise<SessionContext | null> {
   }
 
   return {
-    clerkUserId,
+    authUserId: authUser.id,
     userId: user.id,
     orgId: org.id,
     email: user.email,

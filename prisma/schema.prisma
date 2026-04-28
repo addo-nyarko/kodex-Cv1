@@ -183,7 +183,6 @@ enum SubscriptionStatus {
 
 model User {
   id        String   @id @default(cuid())
-  clerkId   String   @unique
   email     String   @unique
   name      String?
   avatarUrl String?
@@ -207,7 +206,6 @@ model User {
   notifications Notification[]
   auditLogs     AuditLog[]
 
-  @@index([clerkId])
   @@index([email])
 }
 

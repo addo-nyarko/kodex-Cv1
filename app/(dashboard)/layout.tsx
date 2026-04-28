@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { SignOutButton } from "./SignOutButton";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -119,6 +119,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           ) : (
             <div className="relative">
               <button
+                type="button"
                 onClick={() => setSwitcherOpen(!switcherOpen)}
                 className="w-full flex items-center gap-3 px-3 py-3 rounded-lg border border-border hover:bg-accent transition-colors"
                 title={!sidebarExpanded ? selectedProject?.name ?? "Select project" : undefined}
@@ -163,6 +164,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <div className="max-h-48 overflow-y-auto py-1">
                       {projects.map((project) => (
                         <button
+                          type="button"
                           key={project.id}
                           onClick={() => {
                             setSelectedProjectId(project.id);
@@ -233,7 +235,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Bottom */}
         <div className="p-4 border-t border-border flex items-center gap-3">
-          <UserButton />
+          <SignOutButton />
           <motion.div animate={{ opacity: sidebarExpanded ? 1 : 0, width: sidebarExpanded ? "auto" : 0 }} className="overflow-hidden">
             <ThemeToggle />
           </motion.div>
