@@ -12,7 +12,17 @@ const PUBLIC_PATHS = [
   "/auth/callback",
 ];
 
-const PUBLIC_API_PREFIXES = ["/api/webhooks/"];
+const PUBLIC_API_PREFIXES = [
+  "/api/webhooks/",
+  // QStash calls this server-to-server — no session cookie. Security via verifySignatureAppRouter.
+  "/api/scan/worker",
+  // OAuth providers redirect here after user grants access — browser sends session cookie,
+  // but the redirect may race with session refresh. Add as public; route handlers validate state.
+  "/api/integrations/github/callback",
+  "/api/integrations/google/callback",
+  "/api/integrations/notion/callback",
+  "/api/integrations/slack/callback",
+];
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return true;
