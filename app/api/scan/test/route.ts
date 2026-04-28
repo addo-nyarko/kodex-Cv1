@@ -9,9 +9,31 @@ const TestScanSchema = z.object({
   url: z.string().url().optional(),
 });
 
-export const maxDuration = 120; // 2 minutes max for the tester agent
+// V2 NOTE: When the tester agent moves to a managed browser service (Browserless/Browserbase),
+// the actual Puppeteer call runs there, not in this function. This route just orchestrates the
+// remote browser and stays well under Vercel's limits. For now, the route is gated off entirely.
+export const maxDuration = 60; // Vercel Pro cap. Real work happens elsewhere when v2 ships.
 
 export async function POST(req: NextRequest) {
+  // Tester agent is a v2 feature — disabled until live-site testing infrastructure ships.
+  // To enable in dev/staging: set ENABLE_TESTER_AGENT=true in env vars.
+  if (process.env.ENABLE_TESTER_AGENT !== "true") {
+    return Response.json(
+      {
+        error: "Site testing is in private beta",
+        message: "Live-site compliance testing is coming soon. We'll email you when it's available.",
+        waitlist: true,
+      },
+      { status: 503 }
+    );
+  }
+
+  // V2 NOTE: When live-site testing ships, this is where ownership verification goes.
+  // Allowed URL sources:
+  //   1. GitHub integration → repository homepage_url field (already in DB)
+  //   2. URL pre-verified via .well-known/kodex-verification.txt with a per-org token
+  // We never scan arbitrary user-supplied URLs. See HANDOFF.md "tester agent v2" section.
+
   const session = await getSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const { orgId } = session;

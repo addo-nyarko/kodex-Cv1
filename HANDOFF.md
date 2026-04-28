@@ -67,6 +67,36 @@ Then sign out of Clerk (or use incognito) and sign back in.
 4. **Rotate leaked dev credentials** before prod — user pasted live DB password + Clerk/Anthropic/OpenAI keys in earlier transcripts.
 5. Rename `middleware.ts` → `proxy.ts` (Next.js 16 deprecation warning, not urgent).
 
+### Tester agent (v2 — deferred)
+
+`lib/scan-engine/tester-agent/*` is a complete Puppeteer-based live-site checker
+(cookie banners, GDPR rights, PII patterns, security headers, third-party trackers).
+Code is good and tested locally. **Cannot run on Vercel** because:
+- `puppeteer` package = ~170MB Chromium, exceeds Vercel's 250MB function size cap
+- Site checks take 60–120s, exceeds Vercel's 60s Pro function timeout
+- Cold-start launch of Chrome is 3–8s, too slow for serverless
+
+The route at `app/api/scan/test/route.ts` is gated off via `ENABLE_TESTER_AGENT=true`.
+In production this returns 503 with a "coming soon" message.
+
+**To ship v2:**
+1. Sign up for [Browserless.io](https://browserless.io) or [Browserbase](https://browserbase.com).
+   Browserbase is purpose-built for AI agents (~$0.10/session, ~$30/mo for early traction).
+2. In `lib/scan-engine/tester-agent/site-checker.ts`, replace `puppeteer.launch()` with
+   `puppeteer.connect({ browserWSEndpoint: process.env.BROWSER_WS_ENDPOINT })`.
+3. Switch the dependency from `puppeteer` to `puppeteer-core` (no Chromium download).
+4. Implement URL-ownership verification (see TODO in `app/api/scan/test/route.ts`):
+   - For GitHub-connected projects, fetch `repository.homepage` from the GitHub API and
+     allow that exact URL only.
+   - For other projects, generate a per-org verification token, ask the user to host it
+     at `https://their-domain.com/.well-known/kodex-verification.txt`, and verify before
+     allowing the scan.
+5. Set `ENABLE_TESTER_AGENT=true` in Vercel for production.
+6. Update the dashboard to show a "Run live site test" button when the org has a
+   verified URL.
+
+The compliance scanner (`/api/scan/worker`) is independent of this and ships now.
+
 ## Recommended next step
 Fix login blocker → then wire `documentChecklist` → upload slots → then make scan read those uploads and cite per-control. That's the minimum path from "onboarding demo" to "the scan means something."
 
