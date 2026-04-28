@@ -89,7 +89,7 @@ async function generateExecutiveSummary(
 
   const msg = await anthropic.messages.create({
     model: AI_MODELS.SMART,
-    max_tokens: 400,
+    max_tokens: 1500,
     system: "You are a compliance expert writing an executive summary for a compliance report. Be professional, specific, and actionable. 3-4 sentences.",
     messages: [
       {

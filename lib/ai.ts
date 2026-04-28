@@ -31,7 +31,7 @@ export const openai = new Proxy({} as OpenAI, {
 });
 
 export const AI_MODELS = {
-  SMART: "claude-opus-4-5",
+  SMART: "claude-opus-4-7",
   FAST: "claude-haiku-4-5-20251001",
   CHAT: "gpt-4o-mini",
 } as const;

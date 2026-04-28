@@ -77,3 +77,45 @@ export async function extractAndStoreText(evidenceId: string): Promise<string> {
 
   return text;
 }
+
+/**
+ * Find every evidence row in the org that has a fileKey but no extractedText,
+ * and extract them. Capped at 3 items per call to stay under the Vercel 10s limit
+ * (each PDF download + parse can take 2-4s). Fails soft: one bad file does not
+ * block the scan.
+ */
+export async function extractPendingEvidenceForOrg(
+  orgId: string,
+  limit = 3
+): Promise<{ extracted: number; failed: number }> {
+  const pending = await db.evidence.findMany({
+    where: {
+      control: { framework: { orgId } },
+      fileKey: { not: null },
+      extractedText: null,
+    },
+    take: limit,
+    select: { id: true },
+  });
+
+  let extracted = 0;
+  let failed = 0;
+  for (const ev of pending) {
+    try {
+      await extractAndStoreText(ev.id);
+      extracted++;
+    } catch (err) {
+      failed++;
+      console.warn(`Could not extract evidence ${ev.id}:`, err);
+      // Mark it so we don't retry forever on the same broken file.
+      await db.evidence
+        .update({
+          where: { id: ev.id },
+          data: { extractedText: "", textExtractedAt: new Date() },
+        })
+        .catch(() => {});
+    }
+  }
+
+  return { extracted, failed };
+}

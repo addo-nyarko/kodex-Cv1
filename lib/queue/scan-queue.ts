@@ -113,15 +113,14 @@ export async function queueNextChunk(scanId: string, delay?: number): Promise<vo
 
 /** Get the base URL for QStash callbacks */
 function getBaseUrl(): string {
-  // Vercel deployment URL
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
-  }
-  // Explicit base URL (set in env for custom domains)
+  // Stable custom domain wins — same value across every deploy.
   if (process.env.NEXT_PUBLIC_APP_URL) {
     return process.env.NEXT_PUBLIC_APP_URL;
   }
-  // Local dev fallback — never reached in production
+  // Fall back to Vercel's per-deployment URL only if no custom domain set.
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
   if (process.env.NODE_ENV === "development") {
     return "http://localhost:3000";
   }

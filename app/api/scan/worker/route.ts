@@ -21,6 +21,7 @@ import {
   type ScanChunkState,
 } from "@/lib/queue/scan-queue";
 import { assembleEvidence } from "@/lib/scan-engine/evidence-assembler";
+import { extractPendingEvidenceForOrg } from "@/lib/pdf-extract";
 import { synthesizeEvidence } from "@/lib/scan-engine/evidence-synthesizer";
 import { runControl } from "@/lib/scan-engine/control-runner";
 import { evaluateControlWithLLM } from "@/lib/scan-engine/llm-evaluator";
@@ -83,6 +84,13 @@ async function handler(req: NextRequest) {
  */
 async function processEvidencePhase(state: ScanChunkState): Promise<void> {
   const { scanId, orgId } = state;
+
+  // Extract text for any evidence uploaded but never confirmed via /api/evidence/confirm.
+  // Capped at 3 files per invocation to stay under the 10s function limit.
+  const pendingResult = await extractPendingEvidenceForOrg(orgId);
+  if (pendingResult.extracted > 0) {
+    await pushScanEvent(scanId, `Extracted text from ${pendingResult.extracted} document(s)...`);
+  }
 
   await pushScanEvent(scanId, "Assembling evidence from all connected sources...");
 

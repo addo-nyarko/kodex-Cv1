@@ -102,11 +102,21 @@ Rules:
 Return ONLY the JSON object, no markdown fencing.`;
 
   try {
-    const res = await client.messages.create({
-      model: AI_MODELS.FAST,
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }],
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    let res: Awaited<ReturnType<typeof client.messages.create>>;
+    try {
+      res = await client.messages.create(
+        {
+          model: AI_MODELS.FAST,
+          max_tokens: 1000,
+          messages: [{ role: "user", content: prompt }],
+        },
+        { signal: controller.signal }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const text = res.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")

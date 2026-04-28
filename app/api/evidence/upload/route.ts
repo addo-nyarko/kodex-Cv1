@@ -47,5 +47,12 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return Response.json({ uploadUrl, evidenceId, fileKey });
+  return Response.json({
+    uploadUrl,
+    evidenceId,
+    fileKey,
+    // Client MUST POST { evidenceId } here after the S3 PUT completes,
+    // or the file will be invisible to the scan engine.
+    confirmUrl: "/api/evidence/confirm",
+  });
 }
