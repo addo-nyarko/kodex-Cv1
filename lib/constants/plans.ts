@@ -1,3 +1,8 @@
+/**
+ * Plan-based limits enforced at API gates. Use `isOverLimit(session, count, limit)`
+ * from `@/lib/admin` at each gate site — it applies the limit with founder bypass built in.
+ * -1 means unlimited.
+ */
 export const PLAN_LIMITS = {
   FREE:     { frameworks: 1, users: 1,  evidence: 10,  aiRequests: 5,   integrations: 0,  apiAccess: false, sso: false },
   STARTER:  { frameworks: 1, users: 3,  evidence: 100, aiRequests: 50,  integrations: 3,  apiAccess: false, sso: false },

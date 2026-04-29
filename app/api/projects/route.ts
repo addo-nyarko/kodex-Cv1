@@ -215,7 +215,9 @@ export async function POST(req: NextRequest) {
   const limit = PLAN_PROJECT_LIMITS[plan] ?? 2;
   const existingCount = await db.project.count({ where: { orgId, isActive: true } });
 
-  if (existingCount >= limit) {
+  // Admin bypass: founder allow-list skips plan limits.
+  // session.isAdmin is set in lib/auth-helper.ts from the lib/admin.ts allow-list.
+  if (!session.isAdmin && existingCount >= limit) {
     return Response.json(
       { error: "Upgrade to create more projects", limit },
       { status: 403 }

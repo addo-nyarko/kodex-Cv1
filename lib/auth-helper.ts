@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
 import { slugify } from "@/lib/utils";
 import type { OrgRole } from "@prisma/client";
+import { isAdmin } from "@/lib/admin";
 
 export type SessionContext = {
   authUserId: string;
@@ -9,6 +10,7 @@ export type SessionContext = {
   orgId: string;
   email: string;
   role: OrgRole;
+  isAdmin: boolean;
 };
 
 export async function getSession(): Promise<SessionContext | null> {
@@ -58,6 +60,7 @@ export async function getSession(): Promise<SessionContext | null> {
     orgId: org.id,
     email: user.email,
     role: "OWNER",
+    isAdmin: isAdmin(user.email),
   };
 }
 
