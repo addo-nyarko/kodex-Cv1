@@ -1,7 +1,7 @@
 import { getSession } from "@/lib/auth-helper";
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getSignedUploadUrl, buildEvidenceKey } from "@/lib/s3";
+import { getSignedUploadUrl, buildEvidenceKey } from "@/lib/storage";
 import { db } from "@/lib/db";
 import { randomUUID } from "crypto";
 
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
   const evidenceId = randomUUID();
   const fileKey = buildEvidenceKey(orgId, evidenceId, fileName);
 
-  const uploadUrl = await getSignedUploadUrl(fileKey, contentType);
+  const { uploadUrl, token, path } = await getSignedUploadUrl(fileKey);
 
   await db.evidence.create({
     data: {
@@ -49,10 +49,12 @@ export async function POST(req: NextRequest) {
 
   return Response.json({
     uploadUrl,
+    token,
+    path,
     evidenceId,
     fileKey,
-    // Client MUST POST { evidenceId } here after the S3 PUT completes,
-    // or the file will be invisible to the scan engine.
+    // Client MUST PUT to uploadUrl with Authorization: `Bearer ${token}`,
+    // then POST { evidenceId } to confirmUrl to trigger text extraction.
     confirmUrl: "/api/evidence/confirm",
   });
 }

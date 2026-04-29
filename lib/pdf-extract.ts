@@ -1,10 +1,9 @@
-import { s3, BUCKET } from "./s3";
-import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { downloadObject } from "./storage";
 import { db } from "./db";
 
 /**
- * Downloads a file from S3, extracts text (PDF or plain text), and stores it
- * on the Evidence record. Returns the extracted text.
+ * Downloads a file from Supabase Storage, extracts text (PDF or plain text),
+ * and stores it on the Evidence record. Returns the extracted text.
  */
 export async function extractAndStoreText(evidenceId: string): Promise<string> {
   const evidence = await db.evidence.findUniqueOrThrow({
@@ -15,16 +14,7 @@ export async function extractAndStoreText(evidenceId: string): Promise<string> {
     throw new Error(`Evidence ${evidenceId} has no fileKey`);
   }
 
-  // Download from S3
-  const response = await s3.send(
-    new GetObjectCommand({ Bucket: BUCKET, Key: evidence.fileKey })
-  );
-
-  const body = response.Body;
-  if (!body) throw new Error("Empty S3 response body");
-
-  const bytes = await body.transformToByteArray();
-  const buffer = Buffer.from(bytes);
+  const buffer = await downloadObject(evidence.fileKey);
 
   let text = "";
 
