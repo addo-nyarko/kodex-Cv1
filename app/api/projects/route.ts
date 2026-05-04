@@ -2,6 +2,7 @@ import { getSession } from "@/lib/auth-helper";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { ensureControlsForFramework } from "@/lib/frameworks/ensure-controls";
 
 // ─── Checklist generation ────────────────────────────────────────────────────
 
@@ -274,7 +275,7 @@ export async function POST(req: NextRequest) {
 
   // Create/link Framework records for each selected framework
   for (const fwType of data.selectedFrameworks) {
-    await db.framework.upsert({
+    const framework = await db.framework.upsert({
       where: { orgId_type: { orgId, type: fwType } },
       create: {
         orgId,
@@ -287,6 +288,8 @@ export async function POST(req: NextRequest) {
         projectId: project.id,
       },
     });
+
+    await ensureControlsForFramework(framework.id, fwType);
   }
 
   // Fetch the project back with frameworks

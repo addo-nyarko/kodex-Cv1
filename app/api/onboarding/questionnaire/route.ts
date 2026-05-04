@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { classifyOrg } from "@/lib/onboarding/classifier";
-import { frameworkRegistry } from "@/lib/frameworks/registry";
+import { ensureControlsForFramework } from "@/lib/frameworks/ensure-controls";
 
 const QuestionnaireSchema = z.object({
   productDescription: z.string().min(5),
@@ -81,29 +81,7 @@ export async function POST(req: NextRequest) {
       update: {},
     });
 
-    // Create controls from the framework plugin registry
-    const plugin = frameworkRegistry.get(fwType);
-    if (plugin) {
-      for (const rule of plugin.rules) {
-        await db.control.upsert({
-          where: { frameworkId_code: { frameworkId: framework.id, code: rule.code } },
-          create: {
-            frameworkId: framework.id,
-            code: rule.code,
-            title: rule.title,
-            description: rule.title,
-            status: "NOT_STARTED",
-          },
-          update: {},
-        });
-      }
-
-      // Update total controls count
-      await db.framework.update({
-        where: { id: framework.id },
-        data: { totalControls: plugin.rules.length },
-      });
-    }
+    await ensureControlsForFramework(framework.id, fwType);
   }
 
   await db.user.update({

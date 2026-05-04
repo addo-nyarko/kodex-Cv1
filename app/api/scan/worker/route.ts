@@ -31,6 +31,7 @@ import { runShadowPass } from "@/lib/scan-engine/shadow-pass";
 import { buildReport } from "@/lib/scan-engine/report-builder";
 import { createScanReportDocument, autoGeneratePolicies } from "@/lib/scan-engine/post-scan-documents";
 import { frameworkRegistry } from "@/lib/frameworks/registry";
+import { ensureControlsForFramework } from "@/lib/frameworks/ensure-controls";
 import type { ControlEvalResult, EvidencePool } from "@/types/scan";
 import type { FrameworkType } from "@prisma/client";
 
@@ -136,6 +137,31 @@ async function processEvidencePhase(state: ScanChunkState): Promise<void> {
   // Determine framework controls count
   const plugin = frameworkRegistry.get(state.frameworkType);
   if (!plugin) throw new Error(`Unknown framework: ${state.frameworkType}`);
+
+  // Safety net: ensure Control rows exist before the controls phase starts.
+  // Without this, saveControlResult silently discards every evaluation
+  // because db.control.findFirst returns null. See audit/SCAN_DIAGNOSTIC.md.
+  const framework = await db.framework.findFirst({
+    where: { orgId, type: state.frameworkType as FrameworkType },
+  });
+  if (!framework) {
+    throw new Error(
+      `Framework not found for org=${orgId} type=${state.frameworkType}. ` +
+      `This should have been created in onboarding or project creation.`
+    );
+  }
+
+  const controlCount = await ensureControlsForFramework(framework.id, state.frameworkType);
+  if (controlCount === 0) {
+    throw new Error(
+      `No controls available for framework ${state.frameworkType}. ` +
+      `The plugin may be missing or have no rules.`
+    );
+  }
+  await pushScanEvent(
+    scanId,
+    `Prepared ${controlCount} control${controlCount === 1 ? "" : "s"} for evaluation.`
+  );
 
   // Update state: move to controls phase
   state.phase = "controls";
@@ -476,6 +502,13 @@ async function saveControlResult(
         note: raw.note,
       },
     });
+  } else {
+    // This should never happen after the Phase 4 safety net runs in processEvidencePhase.
+    // If it does, the safety net failed or the plugin's rule.code doesn't match the
+    // Control row's code field. Loudly log and persist a scan event so the user sees it.
+    const msg = `Control row missing for code=${rule.code} framework=${frameworkType}. Result discarded.`;
+    console.error(`[saveControlResult] ${msg}`);
+    await pushScanEvent(scanId, `Warning: ${msg}`).catch(() => {});
   }
 }
 
