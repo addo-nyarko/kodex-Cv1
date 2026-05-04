@@ -1,23 +1,44 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { FileCheck, Loader2, Plus, Download, Pencil, Clock } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
-const samplePolicies = [
-  { name: "Data Protection Policy", framework: "GDPR", status: "published", updated: "2 days" },
-  { name: "Information Security Policy", framework: "ISO 27001", status: "draft", updated: "5 days" },
-  { name: "Incident Response Policy", framework: "GDPR", status: "published", updated: "1 week" },
-  { name: "Access Control Policy", framework: "ISO 27001", status: "draft", updated: "3 days" },
-  { name: "Acceptable Use Policy", framework: "GDPR", status: "published", updated: "2 weeks" },
-  { name: "AI Governance Policy", framework: "EU AI Act", status: "draft", updated: "1 day" },
-];
+type Policy = {
+  id: string;
+  title: string;
+  category: string;
+  description: string | null;
+  content: string | null;
+  createdAt: string;
+  aiGenerated: boolean;
+};
 
 export default function PolicyManager() {
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [policyType, setPolicyType] = useState("Data Protection Policy");
   const [showGenerator, setShowGenerator] = useState(false);
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [loadingPolicies, setLoadingPolicies] = useState(true);
+
+  useEffect(() => {
+    fetchPolicies();
+  }, []);
+
+  async function fetchPolicies() {
+    try {
+      const res = await fetch("/api/policies");
+      if (!res.ok) throw new Error("Failed to load policies");
+      const data = await res.json();
+      setPolicies(data.documents ?? []);
+    } catch (e) {
+      console.error("Error loading policies:", e);
+      setPolicies([]);
+    } finally {
+      setLoadingPolicies(false);
+    }
+  }
 
   async function generate() {
     setGenerating(true);
@@ -102,45 +123,57 @@ export default function PolicyManager() {
         )}
 
         {/* Policy Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {samplePolicies.map((policy) => (
-            <div
-              key={policy.name}
-              className="bg-card border border-border rounded-xl p-6 hover:border-blue-600/30 transition-all"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="bg-blue-600/10 w-12 h-12 rounded-lg flex items-center justify-center">
-                  <FileCheck className="w-6 h-6 text-blue-600" />
+        {loadingPolicies ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            <span className="ml-2 text-sm text-muted-foreground">Loading policies...</span>
+          </div>
+        ) : policies.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <p className="mb-2">No policies yet.</p>
+            <p className="text-sm">Run a scan to auto-generate policies, or create one using the Generate Policy tool above.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            {policies.map((policy) => (
+              <div
+                key={policy.id}
+                className="bg-card border border-border rounded-xl p-6 hover:border-blue-600/30 transition-all"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="bg-blue-600/10 w-12 h-12 rounded-lg flex items-center justify-center">
+                    <FileCheck className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                      policy.aiGenerated
+                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                        : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                    }`}
+                  >
+                    {policy.aiGenerated ? "AI Generated" : "Custom"}
+                  </span>
                 </div>
-                <span
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                    policy.status === "published"
-                      ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                      : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                  }`}
-                >
-                  {policy.status.charAt(0).toUpperCase() + policy.status.slice(1)}
-                </span>
+                <h3 className="font-semibold text-foreground mb-1">{policy.title}</h3>
+                <p className="text-sm text-muted-foreground mb-1">{policy.category}</p>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground mb-4">
+                  <Clock className="w-3 h-3" />
+                  {new Date(policy.createdAt).toLocaleDateString()}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="flex-1 px-3 py-2 bg-background border border-border rounded-lg text-sm font-medium text-foreground hover:bg-accent transition-colors flex items-center justify-center gap-1.5">
+                    <Pencil className="w-3.5 h-3.5" />
+                    Edit
+                  </button>
+                  <button className="flex-1 px-3 py-2 bg-background border border-border rounded-lg text-sm font-medium text-foreground hover:bg-accent transition-colors flex items-center justify-center gap-1.5">
+                    <Download className="w-3.5 h-3.5" />
+                    Download
+                  </button>
+                </div>
               </div>
-              <h3 className="font-semibold text-foreground mb-1">{policy.name}</h3>
-              <p className="text-sm text-muted-foreground mb-1">{policy.framework}</p>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mb-4">
-                <Clock className="w-3 h-3" />
-                Updated {policy.updated} ago
-              </div>
-              <div className="flex items-center gap-2">
-                <button className="flex-1 px-3 py-2 bg-background border border-border rounded-lg text-sm font-medium text-foreground hover:bg-accent transition-colors flex items-center justify-center gap-1.5">
-                  <Pencil className="w-3.5 h-3.5" />
-                  Pencil
-                </button>
-                <button className="flex-1 px-3 py-2 bg-background border border-border rounded-lg text-sm font-medium text-foreground hover:bg-accent transition-colors flex items-center justify-center gap-1.5">
-                  <Download className="w-3.5 h-3.5" />
-                  Download
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Generated Policy Display */}
         {result && (
