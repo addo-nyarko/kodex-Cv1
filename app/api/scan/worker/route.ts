@@ -402,6 +402,23 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
   await pushScanEvent(scanId, "Saving scan report to your documents...");
   await createScanReportDocument(postScanCtx);
 
+  // Save synthesized evidence as a Document
+  const scan = await db.scan.findFirst({ where: { id: scanId } });
+  if (scan?.projectId) {
+    const evidenceMarkdown = generateEvidenceMarkdown(frameworkType, controlResults);
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    await db.document.create({
+      data: {
+        projectId: scan.projectId,
+        title: `${frameworkType.replace(/_/g, " ")} Evidence — ${dateStr}`,
+        content: evidenceMarkdown,
+        category: "EVIDENCE",
+        aiGenerated: false,
+      },
+    });
+  }
+
   const failedCount = report.results.filter(
     (r) => r.status === "FAIL" || r.status === "NO_EVIDENCE"
   ).length;
@@ -530,6 +547,69 @@ async function saveControlResult(
     console.error(`[saveControlResult] ${msg}`);
     await pushScanEvent(scanId, `Warning: ${msg}`).catch(() => {});
   }
+}
+
+function generateEvidenceMarkdown(
+  frameworkType: string,
+  controlResults: Array<{ controlCode: string; controlTitle: string; result: ControlEvalResult }>
+): string {
+  const lines: string[] = [];
+  lines.push(`# ${frameworkType.replace(/_/g, " ")} Evidence Summary\n`);
+  lines.push(`Generated: ${new Date().toISOString()}\n`);
+
+  const passed = controlResults.filter((c) => c.result.status === "PASS");
+  const failed = controlResults.filter((c) => c.result.status === "FAIL");
+  const noEvidence = controlResults.filter((c) => c.result.status === "NO_EVIDENCE");
+  const partial = controlResults.filter((c) => c.result.status === "PARTIAL");
+
+  lines.push(`## Summary`);
+  lines.push(`- **Passed**: ${passed.length}/${controlResults.length}`);
+  lines.push(`- **Failed**: ${failed.length}`);
+  lines.push(`- **No Evidence**: ${noEvidence.length}`);
+  lines.push(`- **Partial**: ${partial.length}\n`);
+
+  if (failed.length > 0) {
+    lines.push(`## Failed Controls`);
+    failed.forEach((c) => {
+      lines.push(`### ${c.controlCode}: ${c.controlTitle}`);
+      lines.push(`**Confidence**: ${Math.round(c.result.confidence * 100)}%`);
+      if (c.result.gaps.length > 0) {
+        lines.push(`**Gaps**:`);
+        c.result.gaps.forEach((g) => lines.push(`- ${g}`));
+      }
+      if (c.result.remediations.length > 0) {
+        lines.push(`**Remediations**:`);
+        c.result.remediations.forEach((r) => lines.push(`- ${r}`));
+      }
+      if (c.result.note) lines.push(`**Note**: ${c.result.note}`);
+      lines.push("");
+    });
+  }
+
+  if (noEvidence.length > 0) {
+    lines.push(`## Controls Without Evidence`);
+    noEvidence.forEach((c) => {
+      lines.push(`### ${c.controlCode}: ${c.controlTitle}`);
+      if (c.result.remediations.length > 0) {
+        lines.push(`**Suggested Actions**:`);
+        c.result.remediations.forEach((r) => lines.push(`- ${r}`));
+      }
+      lines.push("");
+    });
+  }
+
+  if (passed.length > 0) {
+    lines.push(`## Passed Controls`);
+    lines.push(`${passed.length} control${passed.length !== 1 ? "s" : ""} verified as compliant.`);
+    passed.slice(0, 5).forEach((c) => {
+      lines.push(`- ${c.controlCode}: ${c.controlTitle}`);
+    });
+    if (passed.length > 5) {
+      lines.push(`- ... and ${passed.length - 5} more`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 // Wrap with QStash signature verification for production

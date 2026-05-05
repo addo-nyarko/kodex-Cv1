@@ -37,13 +37,61 @@ export default async function RiskRegister() {
   if (!session) redirect("/sign-in");
   const { orgId } = session;
 
-  const risks: Array<{
+  // Query control results with confidence scores
+  const controlResults = await db.scanControlResult.findMany({
+    where: {
+      scan: { orgId },
+    },
+    include: {
+      control: { select: { code: true, title: true } },
+      scan: { select: { frameworkId: true } },
+    },
+  });
+
+  // Apply risk mapping logic
+  const riskMap = new Map<string, {
     id: string; title: string; description: string; category: string;
     level: string; riskScore: number; status: string; treatmentPlan: string | null;
-  }> = await db.risk.findMany({
-    where: { orgId },
-    orderBy: { riskScore: "desc" },
+  }>();
+
+  (controlResults as any[]).forEach((cr: any) => {
+    let level = "LOW";
+    let riskScore = 0;
+
+    if (cr.status === "FAIL") {
+      if (cr.confidence >= 0.6) {
+        level = "HIGH";
+        riskScore = 80 + Math.round(cr.confidence * 10);
+      } else {
+        level = "MEDIUM";
+        riskScore = 50 + Math.round(cr.confidence * 20);
+      }
+    } else if (cr.status === "NO_EVIDENCE") {
+      level = "MEDIUM";
+      riskScore = 60;
+    } else if (cr.status === "PASS" && cr.confidence < 0.7) {
+      level = "LOW";
+      riskScore = 30;
+    }
+
+    if (level !== "LOW" || riskScore > 0) {
+      const key = cr.control.code;
+      if (!riskMap.has(key)) {
+        riskMap.set(key, {
+          id: cr.id,
+          title: cr.control.title,
+          description: `${cr.status === "FAIL" ? "Failed control" : cr.status === "NO_EVIDENCE" ? "No evidence provided" : "Low confidence pass"} (${Math.round(cr.confidence * 100)}% confidence)`,
+          category: "CONTROL_RESULT",
+          level,
+          riskScore,
+          status: "OPEN",
+          treatmentPlan: cr.remediations.length > 0 ? cr.remediations[0] : null,
+        });
+      }
+    }
   });
+
+  const risks = Array.from(riskMap.values()).sort((a, b) => b.riskScore - a.riskScore);
 
   const counts = { HIGH: 0, MEDIUM: 0, LOW: 0 };
   risks.forEach((r) => {

@@ -26,7 +26,7 @@ export function DocumentViewer({
   useEffect(() => {
     async function fetchDoc() {
       try {
-        const res = await fetch(`/api/documents/${docId}`);
+        const res = await fetch(`/api/documents/${docId}/view`);
         if (!res.ok) throw new Error("Failed to load document");
         const data = await res.json();
         setDoc(data);

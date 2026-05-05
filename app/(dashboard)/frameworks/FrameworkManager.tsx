@@ -32,7 +32,7 @@ export default function FrameworkManager() {
       const res = await fetch("/api/frameworks");
       if (res.ok) {
         const data = await res.json();
-        setActiveFrameworks(data);
+        setActiveFrameworks(data.frameworks || []);
       }
     } catch {
       // silently handle
