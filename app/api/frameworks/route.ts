@@ -3,13 +3,18 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const { orgId } = session;
 
+  const projectId = req.nextUrl.searchParams.get("projectId");
+
   const frameworks = await db.framework.findMany({
-    where: { orgId },
+    where: {
+      orgId,
+      ...(projectId ? { projectId } : {}),
+    },
     include: {
       controls: { select: { id: true, code: true, title: true, status: true } },
       _count: { select: { scans: true } },

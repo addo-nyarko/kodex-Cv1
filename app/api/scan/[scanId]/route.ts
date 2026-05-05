@@ -14,10 +14,31 @@ export async function GET(
   const { db } = await import("@/lib/db");
   const scan = await db.scan.findFirst({
     where: { id: scanId, orgId },
-    include: { controlResults: true, clarifications: true },
+    include: {
+      framework: { select: { type: true } },
+      controlResults: {
+        include: { control: { select: { code: true, title: true } } },
+      },
+      clarifications: true,
+    },
   });
 
   if (!scan) return Response.json({ error: "Not found" }, { status: 404 });
 
-  return Response.json(scan);
+  // Get documents for projects in this organization
+  const documents = await db.document.findMany({
+    where: {
+      project: {
+        orgId,
+      },
+    },
+    select: { id: true, title: true, category: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+  });
+
+  return Response.json({
+    ...scan,
+    documents,
+  });
 }

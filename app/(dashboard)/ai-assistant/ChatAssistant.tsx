@@ -86,7 +86,7 @@ export default function ChatAssistant() {
             ...m,
             {
               role: "assistant",
-              content: `Redirecting you to your results in 3 seconds — [click here to go now](/scan).`,
+              content: `Redirecting you to your results in 30 seconds — [click here to go now](/scans/${scanId}).`,
               type: "scan-status",
               scanResult: {
                 score: data.score ?? 0,
@@ -95,7 +95,7 @@ export default function ChatAssistant() {
             },
           ]);
           scrollToBottom();
-          setTimeout(() => router.push("/scan"), 3000);
+          setTimeout(() => router.push(`/scans/${scanId}`), 30000);
           clearInterval(interval);
         } else if (data.status === "FAILED") {
           setScanPollStatus("failed");
@@ -154,11 +154,11 @@ export default function ChatAssistant() {
           ...m,
           {
             role: "assistant",
-            content: "The scan has already completed — your answer wasn't needed after all! Redirecting you to your results in 30 seconds...\n\n[Click here to go now](/scan).",
+            content: `The scan has already completed — your answer wasn't needed after all! Redirecting you to your results in 30 seconds...\n\n[Click here to go now](/scans/${scanId}).`,
             type: "scan-status",
           },
         ]);
-        setTimeout(() => router.push("/scan"), 30000);
+        setTimeout(() => router.push(`/scans/${scanId}`), 30000);
         return true;
       }
 
@@ -265,11 +265,11 @@ export default function ChatAssistant() {
       <header className="bg-card/80 backdrop-blur-sm border-b border-border px-8 py-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            {isInScanMode && (
+            {isInScanMode && scanId && (
               <button
-                onClick={() => router.push("/scan")}
+                onClick={() => router.push(`/scans/${scanId}`)}
                 className="p-2 rounded-lg hover:bg-accent transition-colors"
-                title="Back to Scan"
+                title="Back to Scan Results"
               >
                 <ArrowLeft className="w-5 h-5 text-muted-foreground" />
               </button>
@@ -317,7 +317,7 @@ export default function ChatAssistant() {
             </span>
           </div>
           <button
-            onClick={() => router.push("/scan")}
+            onClick={() => scanId && router.push(`/scans/${scanId}`)}
             className="text-sm text-green-400 hover:text-green-300 font-medium transition-colors"
           >
             View Full Results &rarr;
@@ -331,10 +331,10 @@ export default function ChatAssistant() {
             <span className="text-sm text-red-400">Scan encountered an error</span>
           </div>
           <button
-            onClick={() => router.push("/scan")}
+            onClick={() => scanId && router.push(`/scans/${scanId}`)}
             className="text-sm text-red-400 hover:text-red-300 font-medium transition-colors"
           >
-            Go to Scan Page &rarr;
+            Go to Results &rarr;
           </button>
         </div>
       )}

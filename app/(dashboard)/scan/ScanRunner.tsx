@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Shield, AlertTriangle, CheckCircle2, XCircle,
   FileQuestion, Loader2, ChevronDown, ArrowRight,
@@ -65,6 +65,8 @@ const STATUS_CONFIG = {
 
 export default function ScanRunner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId");
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [scanning, setScanning] = useState(false);
@@ -112,25 +114,31 @@ export default function ScanRunner() {
 
   // Load frameworks
   useEffect(() => {
-    fetch("/api/frameworks")
+    const url = projectId
+      ? `/api/frameworks?projectId=${projectId}`
+      : "/api/frameworks";
+    fetch(url)
       .then((r) => r.json())
       .then((d) => {
         setFrameworks(d.frameworks ?? []);
         if (d.frameworks?.length === 1) setSelectedIds(new Set([d.frameworks[0].id]));
       })
       .catch(() => setError("Failed to load frameworks"));
-  }, []);
+  }, [projectId]);
 
   // Load recent completed scans
   useEffect(() => {
-    fetch("/api/scan")
+    const url = projectId
+      ? `/api/scan?projectId=${projectId}`
+      : "/api/scan";
+    fetch(url)
       .then((r) => r.json())
       .then((d) => {
         setRecentScans(d.scans ?? []);
         setLoadingRecent(false);
       })
       .catch(() => setLoadingRecent(false));
-  }, []);
+  }, [projectId]);
 
   // Poll for scan results
   const pollScan = useCallback(async (id: string) => {
@@ -247,14 +255,18 @@ export default function ScanRunner() {
     const ids = Array.from(selectedIds);
 
     try {
+      const body: Record<string, unknown> = ids.length === 1
+        ? { frameworkId: ids[0] }
+        : { frameworkIds: ids };
+
+      if (projectId) {
+        body.projectId = projectId;
+      }
+
       const res = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          ids.length === 1
-            ? { frameworkId: ids[0] }
-            : { frameworkIds: ids }
-        ),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -636,14 +648,23 @@ export default function ScanRunner() {
                         {scan.riskLevel}
                       </span>
                     </div>
-                    <a
-                      href={`/api/scan/${scan.id}/pdf`}
-                      className="text-xs font-medium text-primary hover:underline flex items-center gap-1"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      ↓ PDF
-                    </a>
+                    <div className="flex items-center gap-3">
+                      <a
+                        href={`/scans/${scan.id}`}
+                        className="text-xs font-medium text-primary hover:underline"
+                      >
+                        View Results →
+                      </a>
+                      <a
+                        href={`/api/scan/${scan.id}/pdf`}
+                        className="text-xs font-medium text-muted-foreground hover:text-foreground"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Download PDF"
+                      >
+                        ↓ PDF
+                      </a>
+                    </div>
                   </div>
                 );
               })}

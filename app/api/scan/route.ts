@@ -12,6 +12,7 @@ import {
 const StartScanSchema = z.object({
   frameworkId: z.string().optional(),
   frameworkIds: z.array(z.string()).optional(),
+  projectId: z.string().optional(),
   questionnaire: z.record(z.string(), z.unknown()).optional(),
 }).refine(
   (d) => d.frameworkId || (d.frameworkIds && d.frameworkIds.length > 0),
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Invalid input", details: parsed.error.flatten() }, { status: 422 });
   }
 
-  const { frameworkId, frameworkIds: rawIds, questionnaire } = parsed.data;
+  const { frameworkId, frameworkIds: rawIds, projectId, questionnaire } = parsed.data;
 
   // Normalize to array of IDs
   const allIds = rawIds && rawIds.length > 0 ? rawIds : [frameworkId!];
@@ -49,6 +50,17 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "No valid frameworks found" }, { status: 404 });
   }
 
+  // If projectId provided, validate all frameworks belong to it
+  if (projectId) {
+    const invalidFrameworks = frameworks.filter((fw: any) => fw.projectId !== projectId);
+    if (invalidFrameworks.length > 0) {
+      return Response.json(
+        { error: "Some frameworks don't belong to the specified project" },
+        { status: 400 }
+      );
+    }
+  }
+
   // Create a scan record for each framework
   const scans = await Promise.all(
     frameworks.map((fw: any) =>
@@ -58,6 +70,7 @@ export async function POST(req: NextRequest) {
           frameworkId: fw.id,
           status: "QUEUED",
           evidenceSnapshot: (questionnaire ?? {}) as object,
+          projectId: projectId ?? null,
         },
       })
     )
@@ -120,10 +133,13 @@ export async function GET(req: NextRequest) {
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const { orgId } = session;
 
+  const projectId = req.nextUrl.searchParams.get("projectId");
+
   const scans = await db.scan.findMany({
     where: {
       orgId,
       status: "COMPLETED",
+      ...(projectId ? { projectId } : {}),
     },
     include: {
       framework: {

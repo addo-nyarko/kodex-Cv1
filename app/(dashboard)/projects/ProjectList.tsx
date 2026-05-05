@@ -193,8 +193,15 @@ export default function ProjectList() {
                         <FileText className="w-3 h-3" />
                         {project.documentCount} doc{project.documentCount !== 1 ? "s" : ""}
                       </span>
+                      <Link
+                        href={`/scan?projectId=${project.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="ml-auto text-blue-500 hover:text-blue-400 font-medium transition-colors"
+                      >
+                        Scan →
+                      </Link>
                       {project.lastScanDate && (
-                        <span className="ml-auto">
+                        <span>
                           Last scan{" "}
                           {new Date(project.lastScanDate).toLocaleDateString()}
                         </span>

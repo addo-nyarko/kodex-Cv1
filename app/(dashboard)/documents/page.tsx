@@ -471,7 +471,7 @@ export default function DocumentsPage() {
                         <Eye className="w-4 h-4" />
                       </button>
                       <button
-                        title="Download"
+                        title="Download original"
                         onClick={() => {
                           const a = document.createElement("a");
                           a.href = `/api/documents/${doc.id}/download`;
@@ -482,6 +482,15 @@ export default function DocumentsPage() {
                       >
                         <Download className="w-4 h-4" />
                       </button>
+                      <a
+                        href={`/api/documents/${doc.id}/pdf`}
+                        title="Download as PDF"
+                        className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </a>
                       <button
                         title="Delete"
                         onClick={() => handleDelete(doc.id)}
