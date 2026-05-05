@@ -30,7 +30,16 @@ export async function POST(
     where: { id: scanId, orgId },
     include: { framework: { select: { type: true } } },
   });
-  if (!scan || scan.status !== "AWAITING_CLARIFICATION") {
+  if (!scan) {
+    return Response.json({ error: "Scan not found" }, { status: 404 });
+  }
+
+  // If scan already completed, that's OK — answer arrived too late but don't error
+  if (scan.status === "COMPLETED") {
+    return Response.json({ ok: true, alreadyCompleted: true });
+  }
+
+  if (scan.status !== "AWAITING_CLARIFICATION") {
     return Response.json({ error: "Scan not awaiting clarification" }, { status: 400 });
   }
 

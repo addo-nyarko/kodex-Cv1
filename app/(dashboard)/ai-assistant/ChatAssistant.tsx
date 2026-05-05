@@ -45,6 +45,7 @@ export default function ChatAssistant() {
   const [scanScore, setScanScore] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
+  const askedQuestionRef = useRef<string | null>(null);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
@@ -57,6 +58,7 @@ export default function ChatAssistant() {
     initializedRef.current = true;
 
     if (scanId && pendingQuestion) {
+      askedQuestionRef.current = pendingQuestion;
       setMessages([
         {
           role: "assistant",
@@ -110,17 +112,21 @@ export default function ChatAssistant() {
         }
         // AWAITING_CLARIFICATION again means another question — but we handle that below
         else if (data.status === "AWAITING_CLARIFICATION" && data.pendingQuestion) {
-          setScanPollStatus("idle");
-          setClarificationSubmitted(false);
-          setMessages((m) => [
-            ...m,
-            {
-              role: "assistant",
-              content: `I have another question to continue the scan:\n\n**${data.pendingQuestion}**\n\nPlease answer below and I'll keep going.`,
-              type: "clarification",
-            },
-          ]);
-          scrollToBottom();
+          // Only add the question if we haven't already shown it
+          if (askedQuestionRef.current !== data.pendingQuestion) {
+            askedQuestionRef.current = data.pendingQuestion;
+            setScanPollStatus("idle");
+            setClarificationSubmitted(false);
+            setMessages((m) => [
+              ...m,
+              {
+                role: "assistant",
+                content: `I have another question to continue the scan:\n\n**${data.pendingQuestion}**\n\nPlease answer below and I'll keep going.`,
+                type: "clarification",
+              },
+            ]);
+            scrollToBottom();
+          }
           clearInterval(interval);
         }
       } catch {
@@ -140,8 +146,23 @@ export default function ChatAssistant() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answer }),
       });
+      const data = await res.json();
+
+      // Check if scan already completed (race condition)
+      if (data.alreadyCompleted) {
+        setMessages((m) => [
+          ...m,
+          {
+            role: "assistant",
+            content: "The scan has already completed — your answer wasn't needed after all! Redirecting you to your results in 30 seconds...\n\n[Click here to go now](/scan).",
+            type: "scan-status",
+          },
+        ]);
+        setTimeout(() => router.push("/scan"), 30000);
+        return true;
+      }
+
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to submit clarification");
       }
       return true;
