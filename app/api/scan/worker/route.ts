@@ -363,13 +363,13 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
   });
 
   // Update project-level score
-  const scanRecord = await db.scan.findUnique({
-    where: { id: scanId },
+  const framework = await db.framework.findFirst({
+    where: { orgId, type: frameworkType as FrameworkType },
     select: { projectId: true },
   });
-  if (scanRecord?.projectId) {
+  if (framework?.projectId) {
     const projectFrameworks = await db.framework.findMany({
-      where: { projectId: scanRecord.projectId },
+      where: { projectId: framework.projectId },
       select: { score: true },
     });
     if (projectFrameworks.length > 0) {
@@ -377,7 +377,7 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
         projectFrameworks.reduce((sum: number, f: any) => sum + f.score, 0) / projectFrameworks.length
       );
       await db.project.update({
-        where: { id: scanRecord.projectId },
+        where: { id: framework.projectId },
         data: { complianceScore: projectAvg, scoreUpdatedAt: new Date() },
       });
     }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { DocumentViewer } from "./DocumentViewer";
 import {
   Upload,
   FileText,
@@ -125,6 +126,7 @@ export default function DocumentsPage() {
   const [showUploadZone, setShowUploadZone] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [viewingDocId, setViewingDocId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /* -- Fetch ------------------------------------------------------ */
@@ -463,9 +465,7 @@ export default function DocumentsPage() {
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                       <button
                         title="View"
-                        onClick={() =>
-                          window.open(`/api/documents/${doc.id}/view`, "_blank")
-                        }
+                        onClick={() => setViewingDocId(doc.id)}
                         className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                       >
                         <Eye className="w-4 h-4" />
@@ -497,6 +497,14 @@ export default function DocumentsPage() {
           </div>
         )}
       </div>
+
+      {/* Document viewer modal */}
+      {viewingDocId && (
+        <DocumentViewer
+          docId={viewingDocId}
+          onClose={() => setViewingDocId(null)}
+        />
+      )}
     </div>
   );
 }

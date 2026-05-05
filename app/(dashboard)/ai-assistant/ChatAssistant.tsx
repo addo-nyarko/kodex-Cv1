@@ -16,10 +16,16 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
+interface ScanResult {
+  score: number;
+  riskLevel: string;
+}
+
 interface Message {
   role: "user" | "assistant" | "system";
   content: string;
   type?: "clarification" | "scan-status" | "normal";
+  scanResult?: ScanResult;
 }
 
 type ScanPollStatus = "idle" | "polling" | "completed" | "failed";
@@ -78,8 +84,12 @@ export default function ChatAssistant() {
             ...m,
             {
               role: "assistant",
-              content: `The scan has finished! Your compliance score is **${data.score ?? "N/A"}%** (risk level: ${data.riskLevel ?? "N/A"}).\n\nYou can view the full results, download the audit report as a PDF, and see your remediation roadmap on the scan page.\n\nRedirecting you to your results in 3 seconds — [click here to go now](/scan).`,
+              content: `Redirecting you to your results in 3 seconds — [click here to go now](/scan).`,
               type: "scan-status",
+              scanResult: {
+                score: data.score ?? 0,
+                riskLevel: data.riskLevel ?? "UNKNOWN",
+              },
             },
           ]);
           scrollToBottom();
@@ -351,18 +361,72 @@ export default function ChatAssistant() {
                 <Bot className="w-4 h-4 text-white" />
               </div>
             )}
-            <div
-              className={`max-w-xl text-sm whitespace-pre-wrap ${
-                m.role === "user"
-                  ? "bg-blue-600 text-white rounded-2xl rounded-br-sm px-5 py-3"
-                  : m.type === "clarification"
-                    ? "bg-yellow-500/10 border border-yellow-500/30 rounded-2xl rounded-bl-sm shadow-sm px-5 py-3 text-foreground"
-                    : m.type === "scan-status"
-                      ? "bg-blue-500/10 border border-blue-500/30 rounded-2xl rounded-bl-sm shadow-sm px-5 py-3 text-foreground"
-                      : "bg-card border border-border rounded-2xl rounded-bl-sm shadow-sm px-5 py-3 text-foreground"
-              }`}
-            >
-              {m.content ? renderMarkdown(m.content) : <span className="animate-pulse text-muted-foreground">●</span>}
+            <div className="max-w-2xl">
+              {m.type === "scan-status" && m.scanResult ? (
+                <>
+                  <div className="bg-gradient-to-br from-green-500/20 to-blue-500/20 border border-green-500/30 rounded-2xl rounded-bl-sm shadow-lg p-6 mb-3">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="font-semibold text-foreground mb-1">Scan Complete!</h3>
+                        <p className="text-sm text-muted-foreground">Your compliance assessment is ready</p>
+                      </div>
+                      <CheckCircle2 className="w-6 h-6 text-green-500 flex-shrink-0" />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-card/50 rounded-lg p-3 border border-border">
+                        <p className="text-xs text-muted-foreground mb-1">Compliance Score</p>
+                        <p
+                          className={`text-2xl font-bold ${
+                            m.scanResult.score >= 80
+                              ? "text-green-500"
+                              : m.scanResult.score >= 50
+                                ? "text-amber-500"
+                                : "text-red-500"
+                          }`}
+                        >
+                          {m.scanResult.score}%
+                        </p>
+                      </div>
+                      <div className="bg-card/50 rounded-lg p-3 border border-border">
+                        <p className="text-xs text-muted-foreground mb-1">Risk Level</p>
+                        <p
+                          className={`text-lg font-bold ${
+                            m.scanResult.riskLevel === "LOW"
+                              ? "text-green-500"
+                              : m.scanResult.riskLevel === "MEDIUM"
+                                ? "text-amber-500"
+                                : "text-red-500"
+                          }`}
+                        >
+                          {m.scanResult.riskLevel}
+                        </p>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground mt-4">
+                      View full results, download PDF reports, and see your remediation roadmap on the scan page.
+                    </p>
+                  </div>
+                  <div
+                    className="bg-blue-500/10 border border-blue-500/30 rounded-2xl rounded-bl-sm shadow-sm px-5 py-3 text-foreground text-sm"
+                  >
+                    {m.content ? renderMarkdown(m.content) : <span className="animate-pulse text-muted-foreground">●</span>}
+                  </div>
+                </>
+              ) : (
+                <div
+                  className={`text-sm whitespace-pre-wrap ${
+                    m.role === "user"
+                      ? "bg-blue-600 text-white rounded-2xl rounded-br-sm px-5 py-3"
+                      : m.type === "clarification"
+                        ? "bg-yellow-500/10 border border-yellow-500/30 rounded-2xl rounded-bl-sm shadow-sm px-5 py-3 text-foreground"
+                        : "bg-card border border-border rounded-2xl rounded-bl-sm shadow-sm px-5 py-3 text-foreground"
+                  }`}
+                >
+                  {m.content ? renderMarkdown(m.content) : <span className="animate-pulse text-muted-foreground">●</span>}
+                </div>
+              )}
             </div>
             {m.role === "user" && (
               <div className="flex-shrink-0 bg-blue-600 rounded-full w-8 h-8 flex items-center justify-center mt-1">

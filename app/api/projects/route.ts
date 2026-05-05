@@ -161,12 +161,17 @@ export async function GET() {
     where: { orgId, isActive: true },
     include: {
       frameworks: {
-        select: { id: true, type: true, score: true },
-      },
-      scans: {
-        select: { id: true, completedAt: true, score: true },
-        orderBy: { completedAt: "desc" },
-        take: 1,
+        select: {
+          id: true,
+          type: true,
+          score: true,
+          scans: {
+            where: { status: "COMPLETED" },
+            select: { id: true, completedAt: true },
+            orderBy: { completedAt: "desc" },
+            take: 1,
+          },
+        },
       },
       documents: {
         select: { id: true },
@@ -179,20 +184,27 @@ export async function GET() {
   const limit = PLAN_PROJECT_LIMITS[plan] ?? 2;
 
   return Response.json({
-    projects: (projects as any[]).map((p: any) => ({
-      id: p.id,
-      name: p.name,
-      description: p.description,
-      industry: p.industry,
-      complianceScore: p.complianceScore,
-      frameworkCount: p.frameworks.length,
-      frameworks: p.frameworks.map((f: any) => ({ type: f.type, score: f.score })),
-      scanCount: p.scans.length,
-      lastScanDate: p.scans[0]?.completedAt ?? null,
-      documentCount: p.documents.length,
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-    })),
+    projects: (projects as any[]).map((p: any) => {
+      const allScans = p.frameworks.flatMap((f: any) => f.scans);
+      const lastScan = allScans.sort((a: any, b: any) =>
+        new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()
+      )[0];
+
+      return {
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        industry: p.industry,
+        complianceScore: p.complianceScore,
+        frameworkCount: p.frameworks.length,
+        frameworks: p.frameworks.map((f: any) => ({ type: f.type, score: f.score })),
+        scanCount: allScans.length,
+        lastScanDate: lastScan?.completedAt ?? null,
+        documentCount: p.documents.length,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      };
+    }),
     plan,
     limit,
     count: projects.length,
