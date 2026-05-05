@@ -78,11 +78,12 @@ export default function ChatAssistant() {
             ...m,
             {
               role: "assistant",
-              content: `The scan has finished! Your compliance score is **${data.score ?? "N/A"}%** (risk level: ${data.riskLevel ?? "N/A"}).\n\nYou can view the full results, download the audit report as a PDF, and see your remediation roadmap on the scan page.`,
+              content: `The scan has finished! Your compliance score is **${data.score ?? "N/A"}%** (risk level: ${data.riskLevel ?? "N/A"}).\n\nYou can view the full results, download the audit report as a PDF, and see your remediation roadmap on the scan page.\n\nRedirecting you to your results in 3 seconds — [click here to go now](/scan).`,
               type: "scan-status",
             },
           ]);
           scrollToBottom();
+          setTimeout(() => router.push("/scan"), 3000);
           clearInterval(interval);
         } else if (data.status === "FAILED") {
           setScanPollStatus("failed");
@@ -420,22 +421,55 @@ export default function ChatAssistant() {
   );
 }
 
-/** Simple inline markdown: bold and line breaks */
+/** Simple inline markdown: bold, links, and line breaks */
 function renderMarkdown(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  // First split by links: [text](url)
+  const linkParts = text.split(/(\[[^\]]+\]\([^\)]+\))/g);
+
   return (
     <>
-      {parts.map((part, i) => {
-        if (part.startsWith("**") && part.endsWith("**")) {
-          return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+      {linkParts.map((part, i) => {
+        // Handle links
+        if (part.startsWith("[") && part.includes("](")) {
+          const match = part.match(/\[([^\]]+)\]\(([^\)]+)\)/);
+          if (match) {
+            const [, linkText, url] = match;
+            return (
+              <button
+                key={i}
+                onClick={() => {
+                  if (url.startsWith("/")) {
+                    window.location.href = url;
+                  } else {
+                    window.open(url, "_blank");
+                  }
+                }}
+                className="text-blue-500 hover:text-blue-600 underline font-medium"
+              >
+                {linkText}
+              </button>
+            );
+          }
         }
-        // Split by newlines to preserve line breaks
-        return part.split("\n").map((line, j, arr) => (
-          <span key={`${i}-${j}`}>
-            {line}
-            {j < arr.length - 1 && <br />}
+
+        // Handle bold and line breaks in non-link parts
+        const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
+        return (
+          <span key={i}>
+            {boldParts.map((boldPart, j) => {
+              if (boldPart.startsWith("**") && boldPart.endsWith("**")) {
+                return <strong key={j} className="font-semibold">{boldPart.slice(2, -2)}</strong>;
+              }
+              // Split by newlines to preserve line breaks
+              return boldPart.split("\n").map((line, k, arr) => (
+                <span key={`${j}-${k}`}>
+                  {line}
+                  {k < arr.length - 1 && <br />}
+                </span>
+              ));
+            })}
           </span>
-        ));
+        );
       })}
     </>
   );
