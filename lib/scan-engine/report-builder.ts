@@ -61,19 +61,18 @@ export async function buildReport(
 function buildRoadmap(results: ScanControlResult[]): RemediationTask[] {
   const failed = results.filter((r) => r.status === "FAIL" || r.status === "NO_EVIDENCE");
 
-  const priorityOrder = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
-
   return failed
+    // Sort by confidence ascending first (lowest confidence = most uncertain = fix first)
+    .sort((a, b) => a.confidence - b.confidence)
     .map((r): RemediationTask => ({
       controlCode: r.controlCode,
       title: `Remediate: ${r.controlTitle}`,
       description: r.remediations[0] ?? "Address the identified gaps",
-      priority: r.confidence > 0.8 ? "HIGH" : "MEDIUM",
+      priority: r.confidence > 0.8 ? "MEDIUM" : r.confidence > 0.5 ? "HIGH" : "CRITICAL",
       effortEstimate: "1-3 weeks",
       lawyerQuestions: r.lawyerQuestions,
       articleRef: r.controlCode,
-    }))
-    .sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+    }));
 }
 
 async function generateExecutiveSummary(
