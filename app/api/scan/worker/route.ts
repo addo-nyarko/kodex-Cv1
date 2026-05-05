@@ -432,6 +432,25 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
 
     await pushScanEvent(next.scanId, `Starting next framework: ${next.frameworkType.replace(/_/g, " ")}...`);
 
+    // Ensure Control rows exist for the next framework before its controls phase runs.
+    // The evidence phase (which normally calls this) is skipped for frameworks 2+ in a
+    // multi-framework scan. Without this, saveControlResult silently discards all
+    // evaluations for this framework — the root cause of the 0/0 bug.
+    const nextFramework = await db.framework.findFirst({
+      where: { orgId, type: next.frameworkType as FrameworkType },
+    });
+    if (nextFramework) {
+      const controlCount = await ensureControlsForFramework(nextFramework.id, next.frameworkType);
+      await pushScanEvent(
+        next.scanId,
+        `Prepared ${controlCount} control${controlCount === 1 ? "" : "s"} for evaluation.`
+      );
+    } else {
+      console.error(
+        `[processPostPhase] Framework not found for type=${next.frameworkType} orgId=${orgId}`
+      );
+    }
+
     // Initialize state for next framework (reuse evidence)
     const nextState: ScanChunkState = {
       scanId: next.scanId,
