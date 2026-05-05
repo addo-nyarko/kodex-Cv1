@@ -174,6 +174,7 @@ export default function ScanRunner() {
     let allDone = true;
     let hasAwaiting = false;
     let awaitingScanId: string | null = null;
+    let awaitingQuestion: string | null = null;
 
     for (const id of scanIds) {
       if (newCompleted.has(id)) continue; // Already completed
@@ -213,6 +214,7 @@ export default function ScanRunner() {
           newCompleted.add(id);
           hasAwaiting = true;
           awaitingScanId = id;
+          awaitingQuestion = data.pendingQuestion;
           // Store this scan for the clarification UI
           setResult(data);
         } else {
@@ -233,12 +235,13 @@ export default function ScanRunner() {
       if (pollRef.current) clearInterval(pollRef.current);
     }
 
-    // If any scan is awaiting clarification, redirect to AI assistant with that scan ID
+    // If any scan is awaiting clarification, redirect to AI assistant with that scan ID and question
     if (hasAwaiting && awaitingScanId) {
       setScanning(false);
       scanningRef.current = false;
       if (pollRef.current) clearInterval(pollRef.current);
-      router.push(`/ai-assistant?scanId=${awaitingScanId}`);
+      const questionParam = awaitingQuestion ? `&question=${encodeURIComponent(awaitingQuestion)}` : "";
+      router.push(`/ai-assistant?scanId=${awaitingScanId}${questionParam}`);
     }
   }, [completedScanIds, router]);
 

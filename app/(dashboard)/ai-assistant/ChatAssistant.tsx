@@ -69,6 +69,11 @@ export default function ChatAssistant() {
     }
   }, [scanId, pendingQuestion]);
 
+  // Reset tracking when scanId changes (new scan)
+  useEffect(() => {
+    askedQuestionRef.current = null;
+  }, [scanId]);
+
   // Poll scan status after clarification is submitted
   useEffect(() => {
     if (scanPollStatus !== "polling" || !scanId) return;
@@ -137,6 +142,35 @@ export default function ChatAssistant() {
     return () => clearInterval(interval);
   }, [scanPollStatus, scanId, scrollToBottom]);
 
+  // Detect if a message is likely a real answer or just conversation
+  function isLikelyAnswer(message: string): boolean {
+    const conversationalPhrases = [
+      "come again", "what", "huh", "repeat", "can you", "pardon",
+      "sorry", "ok", "okay", "thanks", "thank you", "hi", "hello",
+      "hmm", "yes please", "no problem", "sure", "got it", "gotcha",
+      "i see", "yeah", "yep", "nope", "maybe", "idk", "i don't know"
+    ];
+
+    const lower = message.toLowerCase().trim();
+
+    // Very short messages that are purely conversational
+    if (conversationalPhrases.some(phrase => lower.includes(phrase) && message.length < 50)) {
+      return false;
+    }
+
+    // Very short responses without substance are not answers
+    if (message.trim().length < 3) {
+      return false;
+    }
+
+    // If it's a question or looks confused, not an answer
+    if (message.includes("?") && message.length < 50) {
+      return false;
+    }
+
+    return true;
+  }
+
   // Submit clarification answer to the scan engine
   async function submitClarification(answer: string) {
     if (!scanId) return false;
@@ -188,8 +222,53 @@ export default function ChatAssistant() {
     setInput("");
     setLoading(true);
 
-    // If we're in clarification mode and haven't submitted yet, send the answer to the scan engine
+    // If we're in clarification mode and haven't submitted yet, check intent
     if (scanId && !clarificationSubmitted) {
+      // Check if this looks like a real answer or just conversation
+      if (!isLikelyAnswer(currentInput)) {
+        // It's conversational — send to chat API for a response that rephrases the question
+        try {
+          const res = await fetch("/api/ai/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: newMessages.filter((m) => m.role !== "system").map((m) => ({
+                role: m.role,
+                content: m.content,
+              })),
+              scanId,
+            }),
+          });
+
+          const reader = res.body?.getReader();
+          const decoder = new TextDecoder();
+          let assistantText = "";
+
+          setMessages((m) => [...m, { role: "assistant", content: "" }]);
+
+          if (reader) {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              assistantText += decoder.decode(value, { stream: true });
+              setMessages((m) => [
+                ...m.slice(0, -1),
+                { role: "assistant", content: assistantText },
+              ]);
+            }
+          }
+        } catch {
+          setMessages((m) => [
+            ...m,
+            { role: "assistant", content: "Sorry, I had trouble connecting. Please try again." },
+          ]);
+        }
+        setLoading(false);
+        scrollToBottom();
+        return;
+      }
+
+      // It looks like a real answer — submit to the scan engine
       const success = await submitClarification(currentInput);
       if (success) {
         setClarificationSubmitted(true);

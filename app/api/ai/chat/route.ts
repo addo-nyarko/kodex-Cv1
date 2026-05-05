@@ -1,6 +1,6 @@
 import { getSession } from "@/lib/auth-helper";
 import { NextRequest } from "next/server";
-import { openai, AI_MODELS, SYSTEM_PROMPTS } from "@/lib/ai";
+import { anthropic, AI_MODELS, SYSTEM_PROMPTS } from "@/lib/ai";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -62,21 +62,21 @@ If they ask about scan progress or results, you can tell them what you know from
     (frameworkContext ? `\n\nCurrent framework: ${frameworkContext}.` : "") +
     scanContext;
 
-  const stream = await openai.chat.completions.create({
+  const stream = await anthropic.messages.create({
     model: AI_MODELS.CHAT,
+    max_tokens: 1024,
     stream: true,
-    messages: [
-      { role: "system", content: contextualSystem },
-      ...messages,
-    ],
+    system: contextualSystem,
+    messages: messages as Parameters<typeof anthropic.messages.create>[0]['messages'],
   });
 
   const readable = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
       for await (const chunk of stream) {
-        const text = chunk.choices[0]?.delta?.content;
-        if (text) controller.enqueue(encoder.encode(text));
+        if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+          controller.enqueue(encoder.encode(chunk.delta.text));
+        }
       }
       controller.close();
     },
