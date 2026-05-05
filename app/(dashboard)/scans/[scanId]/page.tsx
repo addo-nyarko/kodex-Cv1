@@ -120,6 +120,17 @@ export default function ScanResultsPage() {
       })
     : "";
 
+  // Sort controls: FAIL first, then NO_EVIDENCE, then PASS
+  const sortedControls = [...scan.controlResults].sort((a, b) => {
+    const statusOrder = { FAIL: 0, NO_EVIDENCE: 1, PARTIAL: 2, PASS: 3 };
+    const orderA = statusOrder[a.status as keyof typeof statusOrder] ?? 4;
+    const orderB = statusOrder[b.status as keyof typeof statusOrder] ?? 4;
+    if (orderA !== orderB) return orderA - orderB;
+    // If same status, sort by confidence ascending (for FAIL/NO_EVIDENCE)
+    if (a.status !== "PASS") return a.confidence - b.confidence;
+    return 0;
+  });
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
       {/* Header */}
@@ -142,11 +153,26 @@ export default function ScanResultsPage() {
             </a>
           </div>
 
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">
-              {scan.frameworkType} Compliance Report
-            </h1>
-            <p className="text-sm text-muted-foreground mt-2">{formattedDate}</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-foreground">
+                {scan.frameworkType} Compliance Report
+              </h1>
+              <p className="text-sm text-muted-foreground mt-2">{formattedDate}</p>
+            </div>
+            <div>
+              <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
+                scan.status === "COMPLETED"
+                  ? "bg-green-500/10 text-green-700 dark:text-green-400"
+                  : scan.status === "RUNNING"
+                    ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                    : scan.status === "AWAITING_CLARIFICATION"
+                      ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                      : "bg-red-500/10 text-red-700 dark:text-red-400"
+              }`}>
+                {scan.status}
+              </span>
+            </div>
           </div>
         </div>
       </header>
@@ -189,7 +215,7 @@ export default function ScanResultsPage() {
           <div className="bg-card border border-border rounded-xl p-6">
             <p className="text-muted-foreground text-sm mb-2">Controls Passed</p>
             <p className="text-4xl font-bold text-blue-500">
-              {controlsPassed}/{scan.controlResults.length}
+              {controlsPassed}/{sortedControls.length}
             </p>
           </div>
         </div>
@@ -208,7 +234,7 @@ export default function ScanResultsPage() {
         <div className="bg-card border border-border rounded-xl p-6 mb-8">
           <h2 className="text-xl font-bold text-foreground mb-4">Control Results</h2>
           <div className="space-y-3">
-            {scan.controlResults.map((result) => {
+            {sortedControls.map((result) => {
               const config = STATUS_ICONS[result.status];
               const Icon = config.icon;
               return (

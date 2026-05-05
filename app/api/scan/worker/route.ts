@@ -463,6 +463,7 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
       useLLM: state.useLLM,
       clarificationAsked: false,
       phase: "controls", // Skip evidence phase — already done
+      projectId: state.projectId, // Preserve project context
       pendingFrameworks: remaining.length > 0 ? remaining : undefined,
     };
 

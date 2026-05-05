@@ -15,30 +15,56 @@ export async function GET(
   const scan = await db.scan.findFirst({
     where: { id: scanId, orgId },
     include: {
-      framework: { select: { type: true } },
+      framework: { select: { type: true, id: true } },
       controlResults: {
-        include: { control: { select: { code: true, title: true } } },
+        include: {
+          control: { select: { code: true, title: true } },
+        },
       },
-      clarifications: true,
     },
   });
 
   if (!scan) return Response.json({ error: "Not found" }, { status: 404 });
 
-  // Get documents for projects in this organization
-  const documents = await db.document.findMany({
-    where: {
-      project: {
-        orgId,
+  // Get documents linked to this scan's project
+  const projectId = scan.projectId;
+  const documents: Array<{ id: string; title: string; category: string; createdAt: Date }> = [];
+  if (projectId) {
+    const docs = await db.document.findMany({
+      where: {
+        projectId,
+        category: { in: ["POLICY", "SCAN_REPORT"] },
       },
-    },
-    select: { id: true, title: true, category: true, createdAt: true },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-  });
+      select: { id: true, title: true, category: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+    });
+    documents.push(...docs);
+  }
 
   return Response.json({
-    ...scan,
+    id: scan.id,
+    status: scan.status,
+    score: scan.score,
+    riskLevel: scan.riskLevel,
+    frameworkId: scan.frameworkId,
+    frameworkType: scan.framework.type,
+    createdAt: scan.createdAt,
+    completedAt: scan.completedAt,
+    reportJson: scan.reportJson,
+    shadowPassJson: scan.shadowPassJson,
+    controlResults: scan.controlResults.map((cr: any) => ({
+      id: cr.id,
+      status: cr.status,
+      confidence: cr.confidence,
+      gaps: cr.gaps,
+      remediations: cr.remediations,
+      evidenceUsed: cr.evidenceUsed,
+      note: cr.note,
+      control: {
+        code: cr.control.code,
+        title: cr.control.title,
+      },
+    })),
     documents,
   });
 }

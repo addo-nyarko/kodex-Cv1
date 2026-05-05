@@ -1,323 +1,217 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  Trash2,
-  Shield,
-  FileText,
-  Calendar,
-  AlertTriangle,
-  CheckCircle2,
+  Plus,
   Loader2,
+  AlertCircle,
+  Shield,
 } from "lucide-react";
-import Link from "next/link";
 
-interface FrameworkData {
+interface Framework {
   id: string;
   type: string;
   score: number;
   status: string;
   totalControls: number;
   passedControls: number;
-  scans: Array<{
-    id: string;
-    completedAt: string;
-  }>;
 }
 
-interface DocumentData {
+interface Scan {
   id: string;
-  title: string;
-  category: string;
+  status: string;
+  score: number;
   createdAt: string;
+  frameworkType: string;
 }
 
 interface ProjectData {
   id: string;
   name: string;
   description: string | null;
-  industry: string | null;
   complianceScore: number;
-  frameworks: FrameworkData[];
-  documents: DocumentData[];
   createdAt: string;
+  updatedAt: string;
+  frameworks: Framework[];
+  scans: Scan[];
 }
 
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const id = params.id as string;
+  const projectId = params.id as string;
 
   const [project, setProject] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [selectedFramework, setSelectedFramework] = useState<string | null>(null);
 
   useEffect(() => {
-    async function fetchProject() {
+    async function loadProject() {
       try {
-        const res = await fetch(`/api/projects/${id}`);
-        if (!res.ok) throw new Error("Failed to load project");
-        const data = await res.json();
-        setProject(data.project);
+        const res = await fetch(`/api/projects/${projectId}`);
+        if (!res.ok) throw new Error("Project not found");
+        setProject(await res.json());
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Something went wrong");
+        setError(e instanceof Error ? e.message : "Failed to load project");
       } finally {
         setLoading(false);
       }
     }
-    fetchProject();
-  }, [id]);
+    loadProject();
+  }, [projectId]);
 
-  async function handleDelete() {
-    setDeleting(true);
-    try {
-      const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete project");
-      router.push("/projects");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete");
-      setDeleting(false);
-    }
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
-  const statusColor = {
-    NOT_STARTED: "text-muted-foreground",
-    IN_PROGRESS: "text-amber-500",
-    AUDIT_READY: "text-green-500",
-  };
-
-  const riskColor = (score: number) => {
-    if (score >= 80) return "text-green-500 bg-green-500/10";
-    if (score >= 50) return "text-amber-500 bg-amber-500/10";
-    return "text-red-500 bg-red-500/10";
-  };
-
-  return (
-    <div className="min-h-screen">
-      {/* Header */}
-      <div className="bg-card/80 backdrop-blur-sm border-b border-border px-8 py-6">
-        <div className="flex items-center gap-4 mb-6">
+  if (error || !project) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <AlertCircle className="w-8 h-8 mx-auto text-red-500 mb-4" />
+          <p className="text-red-500">{error || "Project not found"}</p>
           <button
             onClick={() => router.push("/projects")}
-            className="p-2 rounded-lg hover:bg-accent transition-colors"
-            title="Back to Projects"
+            className="mt-4 text-blue-500 hover:underline"
           >
-            <ArrowLeft className="w-5 h-5 text-muted-foreground" />
+            Back to projects
           </button>
-          <div className="flex-1">
-            {loading ? (
-              <div className="h-8 w-48 bg-muted rounded animate-pulse" />
-            ) : (
-              <>
-                <h1 className="text-2xl font-bold">{project?.name}</h1>
-                {project?.description && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {project.description}
-                  </p>
-                )}
-              </>
+        </div>
+      </div>
+    );
+  }
+
+  const filteredScans = selectedFramework
+    ? project.scans.filter((s) => s.frameworkType === selectedFramework)
+    : project.scans;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
+      <header className="bg-card/80 backdrop-blur-sm border-b border-border">
+        <div className="max-w-6xl mx-auto px-8 py-6">
+          <div className="flex items-start justify-between mb-4">
+            <button
+              onClick={() => router.push("/projects")}
+              className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to Projects
+            </button>
+            <a
+              href={`/scan?projectId=${projectId}`}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors text-sm font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              Start New Scan
+            </a>
+          </div>
+
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">{project.name}</h1>
+            {project.description && (
+              <p className="text-muted-foreground mt-2">{project.description}</p>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setDeleteConfirm(true)}
-              disabled={loading}
-              className="flex items-center gap-2 px-4 py-2.5 bg-red-600/10 text-red-600 rounded-lg text-sm font-medium hover:bg-red-600/20 transition-colors disabled:opacity-50"
-            >
-              <Trash2 className="w-4 h-4" />
-              Delete
-            </button>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-8 py-8">
+        {/* Compliance Score */}
+        <div className="bg-card border border-border rounded-xl p-8 mb-8">
+          <p className="text-sm text-muted-foreground mb-2">Overall Compliance Score</p>
+          <p
+            className={`text-5xl font-bold ${
+              project.complianceScore >= 80
+                ? "text-green-500"
+                : project.complianceScore >= 50
+                  ? "text-amber-500"
+                  : "text-red-500"
+            }`}
+          >
+            {project.complianceScore}%
+          </p>
+        </div>
+
+        {/* Frameworks */}
+        <div className="mb-8">
+          <h2 className="text-xl font-bold text-foreground mb-4">Compliance Frameworks</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {project.frameworks.map((fw) => (
+              <button
+                key={fw.id}
+                onClick={() => setSelectedFramework(selectedFramework === fw.type ? null : fw.type)}
+                className={`p-4 rounded-lg border-2 transition-all text-left ${
+                  selectedFramework === fw.type
+                    ? "border-blue-600 bg-blue-600/5"
+                    : "border-border bg-card hover:border-border"
+                }`}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-blue-600" />
+                    <span className="font-semibold text-sm">{fw.type.replace(/_/g, " ")}</span>
+                  </div>
+                  <span
+                    className={`text-lg font-bold ${
+                      fw.score >= 80 ? "text-green-500" : fw.score >= 50 ? "text-amber-500" : "text-red-500"
+                    }`}
+                  >
+                    {fw.score}%
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">
+                  {fw.passedControls}/{fw.totalControls} controls passed
+                </p>
+              </button>
+            ))}
           </div>
         </div>
 
-        {project && (
-          <div className="text-xs text-muted-foreground">
-            Created {new Date(project.createdAt).toLocaleDateString()}
-            {project.industry && ` • ${project.industry}`}
-          </div>
-        )}
-      </div>
-
-      <div className="p-8">
-        {/* Error state */}
-        {error && (
-          <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400 mb-6">
-            {error}
-          </div>
-        )}
-
-        {/* Loading state */}
-        {loading && (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          </div>
-        )}
-
-        {/* Frameworks section */}
-        {project && (
-          <>
-            <div className="mb-8">
-              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <Shield className="w-5 h-5" />
-                Frameworks ({project.frameworks.length})
-              </h2>
-              <div className="space-y-3">
-                {project.frameworks.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No frameworks added to this project
-                  </p>
-                ) : (
-                  project.frameworks.map((fw) => (
-                    <div
-                      key={fw.id}
-                      className="bg-card border border-border rounded-lg p-4 hover:border-blue-600/30 transition-colors"
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div>
-                          <h3 className="font-medium">
-                            {fw.type.replace(/_/g, " ")}
-                          </h3>
-                          <p
-                            className={`text-xs mt-1 ${
-                              statusColor[fw.status as keyof typeof statusColor] ||
-                              statusColor.NOT_STARTED
-                            }`}
-                          >
-                            {fw.status.replace(/_/g, " ")}
-                          </p>
-                        </div>
-                        <div className={`text-2xl font-bold ${riskColor(fw.score)}`}>
-                          {fw.score}%
-                        </div>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {fw.passedControls}/{fw.totalControls} controls passed
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* Scan History */}
-            <div className="mb-8">
-              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5" />
-                Scan History
-              </h2>
-              <div className="space-y-3">
-                {project.frameworks.length === 0 ||
-                 project.frameworks.every((f) => f.scans.length === 0) ? (
-                  <p className="text-sm text-muted-foreground">
-                    No scans completed yet
-                  </p>
-                ) : (
-                  project.frameworks.flatMap((fw) =>
-                    fw.scans.map((scan, idx) => (
-                      <div
-                        key={`${fw.id}-${idx}`}
-                        className="bg-card border border-border rounded-lg p-4 flex items-center justify-between"
-                      >
-                        <div>
-                          <p className="font-medium text-sm">
-                            {fw.type.replace(/_/g, " ")}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            <Calendar className="w-3 h-3 inline mr-1" />
-                            {new Date(scan.completedAt).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <Link
-                          href={`/api/scan/${scan.id}/pdf`}
-                          target="_blank"
-                          className="flex items-center gap-2 px-3 py-1.5 text-blue-600 hover:bg-blue-600/10 rounded text-sm font-medium transition-colors"
-                        >
-                          ↓ PDF
-                        </Link>
-                      </div>
-                    ))
-                  )
-                )}
-              </div>
-            </div>
-
-            {/* Documents */}
-            <div>
-              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <FileText className="w-5 h-5" />
-                Documents ({project.documents.length})
-              </h2>
-              <div className="space-y-3">
-                {project.documents.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No documents yet
-                  </p>
-                ) : (
-                  project.documents.map((doc) => (
-                    <div
-                      key={doc.id}
-                      className="bg-card border border-border rounded-lg p-4 hover:border-blue-600/30 transition-colors"
-                    >
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <h3 className="font-medium text-sm">{doc.title}</h3>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {doc.category} •{" "}
-                            {new Date(doc.createdAt).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Delete confirmation modal */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card border border-border rounded-lg p-6 max-w-sm">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="w-5 h-5 text-red-500" />
-              <h3 className="font-semibold">Delete Project</h3>
-            </div>
-            <p className="text-sm text-muted-foreground mb-6">
-              Are you sure? This will delete the project and all associated scans and
-              documents. This action cannot be undone.
+        {/* Recent Scans */}
+        <div className="bg-card border border-border rounded-xl p-6">
+          <h2 className="text-xl font-bold text-foreground mb-4">Recent Scans</h2>
+          {filteredScans.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">
+              {selectedFramework
+                ? `No scans for ${selectedFramework.replace(/_/g, " ")}`
+                : "No completed scans yet"}
             </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setDeleteConfirm(false)}
-                disabled={deleting}
-                className="px-4 py-2 rounded-lg border border-border hover:bg-accent transition-colors text-sm font-medium disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors text-sm font-medium disabled:opacity-50 flex items-center gap-2"
-              >
-                {deleting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  "Delete Project"
-                )}
-              </button>
+          ) : (
+            <div className="space-y-3">
+              {filteredScans.map((scan) => (
+                <div key={scan.id} className="flex items-center justify-between p-4 bg-muted/20 rounded-lg">
+                  <div className="flex-1">
+                    <p className="font-medium text-foreground">
+                      {scan.frameworkType.replace(/_/g, " ")}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(scan.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <p className={`font-bold ${scan.score >= 80 ? "text-green-500" : scan.score >= 50 ? "text-amber-500" : "text-red-500"}`}>
+                      {scan.score}%
+                    </p>
+                    <a
+                      href={`/scans/${scan.id}`}
+                      className="text-sm text-blue-500 hover:text-blue-400 font-medium"
+                    >
+                      View Results
+                    </a>
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </main>
     </div>
   );
 }

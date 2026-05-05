@@ -1,18 +1,20 @@
 import { getSession } from "@/lib/auth-helper";
+import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const { orgId } = session;
 
-  const { id } = await params;
+  const { id: projectId } = await params;
 
+  // Fetch project with frameworks and scans
   const project = await db.project.findFirst({
-    where: { id, orgId: session.orgId },
+    where: { id: projectId, orgId },
     include: {
       frameworks: {
         select: {
@@ -22,45 +24,49 @@ export async function GET(
           status: true,
           totalControls: true,
           passedControls: true,
-          scans: {
-            where: { status: "COMPLETED" },
-            include: {
-              framework: { select: { type: true } },
-            },
-            orderBy: { completedAt: "desc" },
-            take: 20,
-          },
         },
       },
-      documents: {
-        select: { id: true, title: true, category: true, createdAt: true },
+      scans: {
+        where: { status: "COMPLETED" },
+        select: {
+          id: true,
+          status: true,
+          score: true,
+          createdAt: true,
+          framework: {
+            select: { type: true },
+          },
+        },
         orderBy: { createdAt: "desc" },
-        take: 10,
       },
     },
   });
 
-  if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!project) {
+    return Response.json({ error: "Project not found" }, { status: 404 });
+  }
 
-  return NextResponse.json({ project });
-}
-
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { id } = await params;
-
-  const project = await db.project.findFirst({
-    where: { id, orgId: session.orgId },
+  return Response.json({
+    id: project.id,
+    name: project.name,
+    description: project.description,
+    complianceScore: project.complianceScore,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+    frameworks: project.frameworks.map((fw: any) => ({
+      id: fw.id,
+      type: fw.type,
+      score: fw.score,
+      status: fw.status,
+      totalControls: fw.totalControls,
+      passedControls: fw.passedControls,
+    })),
+    scans: project.scans.map((scan: any) => ({
+      id: scan.id,
+      status: scan.status,
+      score: scan.score,
+      createdAt: scan.createdAt,
+      frameworkType: scan.framework?.type ?? "UNKNOWN",
+    })),
   });
-
-  if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-  await db.project.delete({ where: { id } });
-
-  return NextResponse.json({ ok: true });
 }

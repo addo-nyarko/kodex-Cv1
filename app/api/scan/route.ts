@@ -99,6 +99,7 @@ export async function POST(req: NextRequest) {
     useLLM: false,
     clarificationAsked: false,
     phase: "evidence",
+    projectId: projectId || undefined,
     pendingFrameworks,
   };
 
