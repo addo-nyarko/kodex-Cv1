@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   Shield, AlertTriangle, CheckCircle2, XCircle,
   FileQuestion, Loader2, ChevronDown, ArrowRight,
@@ -63,10 +64,13 @@ const STATUS_CONFIG = {
 };
 
 export default function ScanRunner() {
+  const router = useRouter();
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [scanning, setScanning] = useState(false);
   const [scanId, setScanId] = useState<string | null>(null);
+  const [allScanIds, setAllScanIds] = useState<string[]>([]);
+  const [completedScanIds, setCompletedScanIds] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ScanResult | null>(null);
   const [events, setEvents] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -156,6 +160,80 @@ export default function ScanRunner() {
   // Track how many events we've already shown (for incremental polling)
   const eventCountRef = useRef(0);
 
+  /** Poll all scan IDs in a multi-framework scan */
+  const pollAllScans = useCallback(async (scanIds: string[]) => {
+    const newCompleted = new Set(completedScanIds);
+    let allDone = true;
+    let hasAwaiting = false;
+    let awaitingScanId: string | null = null;
+
+    for (const id of scanIds) {
+      if (newCompleted.has(id)) continue; // Already completed
+
+      try {
+        const res = await fetch(`/api/scan/status/${id}?eventsSince=${eventCountRef.current}`);
+        if (!res.ok) {
+          allDone = false;
+          continue;
+        }
+        const data = await res.json();
+
+        // Append new narration events from the first active scan
+        if (!eventCountRef.current && data.events && data.events.length > 0) {
+          setEvents((prev) => [...prev, ...data.events]);
+          eventCountRef.current = data.eventCount;
+        }
+
+        // Check terminal states for this scan
+        if (data.status === "COMPLETED") {
+          newCompleted.add(id);
+          // Add to recent scans list
+          setRecentScans((prev) => [
+            {
+              id: data.id,
+              frameworkType: data.frameworkType,
+              score: data.score ?? 0,
+              riskLevel: data.riskLevel ?? "UNKNOWN",
+              completedAt: new Date().toISOString(),
+            },
+            ...prev.filter((s) => s.id !== data.id),
+          ]);
+        } else if (data.status === "FAILED") {
+          newCompleted.add(id);
+          setError(data.errorMessage || `Scan ${data.frameworkType} failed`);
+        } else if (data.status === "AWAITING_CLARIFICATION") {
+          newCompleted.add(id);
+          hasAwaiting = true;
+          awaitingScanId = id;
+          // Store this scan for the clarification UI
+          setResult(data);
+        } else {
+          allDone = false;
+        }
+      } catch {
+        // Keep polling on network errors
+        allDone = false;
+      }
+    }
+
+    setCompletedScanIds(newCompleted);
+
+    // Stop polling only when all scans are done
+    if (allDone && !hasAwaiting) {
+      setScanning(false);
+      scanningRef.current = false;
+      if (pollRef.current) clearInterval(pollRef.current);
+    }
+
+    // If any scan is awaiting clarification, redirect to AI assistant with that scan ID
+    if (hasAwaiting && awaitingScanId) {
+      setScanning(false);
+      scanningRef.current = false;
+      if (pollRef.current) clearInterval(pollRef.current);
+      router.push(`/ai-assistant?scanId=${awaitingScanId}`);
+    }
+  }, [completedScanIds, router]);
+
   async function startScan() {
     if (selectedIds.size === 0) return;
     setScanning(true);
@@ -164,6 +242,7 @@ export default function ScanRunner() {
     setEvents([]);
     setError(null);
     eventCountRef.current = 0;
+    setCompletedScanIds(new Set());
 
     const ids = Array.from(selectedIds);
 
@@ -188,14 +267,16 @@ export default function ScanRunner() {
 
       const data = await res.json();
       const newScanId = data.scanId;
+      const scanIds = data.scanIds ?? [newScanId];
       setScanId(newScanId);
+      setAllScanIds(scanIds);
 
       if (data.message) {
         setEvents([data.message]);
       }
 
-      // Start polling for progress + results
-      pollRef.current = setInterval(() => pollProgress(newScanId), 2000);
+      // Start polling for progress + results across all scan IDs
+      pollRef.current = setInterval(() => pollAllScans(scanIds), 2000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start scan");
       setScanning(false);
@@ -276,15 +357,23 @@ export default function ScanRunner() {
             },
             ...prev.filter((s) => s.id !== data.id),
           ]);
+          // Mark as completed in the multi-framework tracking
+          setCompletedScanIds((prev) => new Set([...prev, result.id]));
         } else if (data.status === "FAILED") {
           setError(data.errorMessage || "Scan failed");
           setResult(data);
+          setCompletedScanIds((prev) => new Set([...prev, result.id]));
         } else if (data.status === "QUEUED" || data.status === "RUNNING") {
           // Scan was resumed! Start polling for completion with events
           setScanning(true);
           setEvents((e) => [...e, "Scan resumed after clarification..."]);
           eventCountRef.current = 0;
-          pollRef.current = setInterval(() => pollProgress(result.id), 2000);
+          // Resume polling all remaining scans
+          if (allScanIds.length > 0) {
+            pollRef.current = setInterval(() => pollAllScans(allScanIds), 2000);
+          } else {
+            pollRef.current = setInterval(() => pollProgress(result.id), 2000);
+          }
         }
         // If still AWAITING_CLARIFICATION, user hasn't answered yet — keep showing the prompt
       } catch {
@@ -293,7 +382,7 @@ export default function ScanRunner() {
     };
 
     checkResume();
-  }, [result?.id, result?.status, pollScan]);
+  }, [result?.id, result?.status, allScanIds, pollAllScans]);
 
   useEffect(() => {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
