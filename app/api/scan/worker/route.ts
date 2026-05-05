@@ -26,7 +26,6 @@ import { synthesizeEvidence } from "@/lib/scan-engine/evidence-synthesizer";
 import { runControl } from "@/lib/scan-engine/control-runner";
 import { evaluateControlWithLLM } from "@/lib/scan-engine/llm-evaluator";
 import { generateClarificationQuestion } from "@/lib/scan-engine/clarification-manager";
-import { narrateEvent } from "@/lib/scan-engine/narrator";
 import { runShadowPass } from "@/lib/scan-engine/shadow-pass";
 import { buildReport } from "@/lib/scan-engine/report-builder";
 import { createScanReportDocument, autoGeneratePolicies } from "@/lib/scan-engine/post-scan-documents";
@@ -207,8 +206,6 @@ async function processControlsPhase(state: ScanChunkState): Promise<void> {
       continue;
     }
 
-    await pushScanEvent(scanId, `Checking: ${rule.title} (${rule.code})...`);
-
     // Evaluate control
     let raw: ControlEvalResult;
     if (state.useLLM) {
@@ -225,15 +222,9 @@ async function processControlsPhase(state: ScanChunkState): Promise<void> {
       raw.confidence = Math.min(raw.confidence + 0.15, 0.6);
     }
 
-    // Narrate result
-    const message = await narrateEvent({
-      type: "control_evaluated",
-      controlCode: rule.code,
-      controlTitle: rule.title,
-      result: raw,
-      evidence,
-    });
-    await pushScanEvent(scanId, message);
+    // One-line status update instead of verbose narration
+    const statusMessage = `Evaluating ${rule.code}: ${rule.title}`;
+    await pushScanEvent(scanId, statusMessage);
 
     // Check if clarification is needed
     if (
@@ -302,12 +293,8 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
 
   for (const [fw, result] of Object.entries(shadowPass)) {
     if (result.met > 0) {
-      const message = await narrateEvent({
-        type: "cross_framework_hit",
-        framework: fw,
-        shadowResult: result,
-      });
-      await pushScanEvent(scanId, message);
+      const pct = Math.round((result.met / result.total) * 100);
+      await pushScanEvent(scanId, `${fw.replace(/_/g, " ")} — ${pct}% coverage (${result.met}/${result.total} controls)`);
     }
   }
 
