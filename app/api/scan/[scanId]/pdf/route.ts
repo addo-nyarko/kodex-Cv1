@@ -1,19 +1,21 @@
 import { getSession } from "@/lib/auth-helper";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { generateAuditPdfHtml } from "@/lib/scan-engine/pdf-report";
+import React from "react";
+import { renderToBuffer } from "@react-pdf/renderer";
+import { AuditReportDocument } from "@/lib/scan-engine/pdf-report-renderer";
+import type { FrameworkReport } from "@/types/scan";
 
-/**
- * GET /api/scan/[scanId]/pdf
- * Returns an HTML audit report that can be printed/saved as PDF.
- * The browser's print dialog (Ctrl+P / Cmd+P) generates a clean PDF.
- */
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ scanId: string }> }
 ) {
   const session = await getSession();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const { scanId } = await params;
 
@@ -28,38 +30,63 @@ export async function GET(
     },
   });
 
-  if (!scan) return Response.json({ error: "Scan not found" }, { status: 404 });
+  if (!scan) {
+    return NextResponse.json({ error: "Scan not found" }, { status: 404 });
+  }
   if (scan.status !== "COMPLETED") {
-    return Response.json({ error: "Scan not completed yet" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Scan not completed yet" },
+      { status: 400 }
+    );
   }
 
-  const report = scan.reportJson as Record<string, unknown> | null;
+  const report = scan.reportJson as FrameworkReport | null;
+  if (!report) {
+    return NextResponse.json(
+      { error: "Report data not available" },
+      { status: 404 }
+    );
+  }
 
-  const html = generateAuditPdfHtml({
-    scanId: scan.id,
-    orgName: scan.org.name ?? "Organization",
-    frameworkType: scan.framework.type,
-    score: scan.score ?? 0,
-    riskLevel: scan.riskLevel ?? "UNKNOWN",
-    startedAt: scan.startedAt?.toISOString() ?? scan.createdAt.toISOString(),
-    completedAt: scan.completedAt?.toISOString() ?? new Date().toISOString(),
-    controlResults: (scan.controlResults as any[]).map((r: any) => ({
-      controlCode: r.control.code,
-      controlTitle: r.control.title,
-      status: r.status,
-      confidence: r.confidence,
-      gaps: r.gaps,
-      remediations: r.remediations,
-      note: r.note ?? "",
-    })),
-    executiveSummary: (report?.executiveSummary as string) ?? "No executive summary available.",
-    roadmap: (report?.roadmap as { controlCode: string; title: string; description: string; priority: string }[]) ?? [],
-    shadowPass: scan.shadowPassJson as Record<string, { met: number; total: number; pct: number }> | null,
+  const orgName = scan.org?.name ?? "Organization";
+  const frameworkType = scan.framework?.type ?? "UNKNOWN";
+  const generatedAt = new Date().toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
   });
+  const completedAt = scan.completedAt
+    ? new Date(scan.completedAt).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "Unknown";
 
-  return new Response(html, {
+  // Generate the PDF binary
+  const pdfBuffer = (await renderToBuffer(
+    React.createElement(AuditReportDocument, {
+      scanId: scan.id,
+      orgName,
+      frameworkType,
+      report,
+      generatedAt,
+      completedAt,
+    }) as any
+  )) as Buffer;
+
+  // Build a clean filename
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const frameworkSlug = frameworkType.toLowerCase().replace(/_/g, "-");
+  const filename = `kodex-${frameworkSlug}-audit-${dateStr}.pdf`;
+
+  return new NextResponse(pdfBuffer as any, {
     headers: {
-      "Content-Type": "text/html; charset=utf-8",
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Length": pdfBuffer.length.toString(),
     },
   });
 }
