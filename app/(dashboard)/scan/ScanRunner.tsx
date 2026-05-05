@@ -74,6 +74,14 @@ export default function ScanRunner() {
   const [connectedIntegrations, setConnectedIntegrations] = useState<IntegrationStatus[]>([]);
   const [repoJustScanned, setRepoJustScanned] = useState(false);
   const [integrationJustSynced, setIntegrationJustSynced] = useState(false);
+  const [recentScans, setRecentScans] = useState<Array<{
+    id: string;
+    frameworkType: string;
+    score: number;
+    riskLevel: string;
+    completedAt: string | null;
+  }>>([]);
+  const [loadingRecent, setLoadingRecent] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scanningRef = useRef(false);
 
@@ -107,6 +115,17 @@ export default function ScanRunner() {
         if (d.frameworks?.length === 1) setSelectedIds(new Set([d.frameworks[0].id]));
       })
       .catch(() => setError("Failed to load frameworks"));
+  }, []);
+
+  // Load recent completed scans
+  useEffect(() => {
+    fetch("/api/scan")
+      .then((r) => r.json())
+      .then((d) => {
+        setRecentScans(d.scans ?? []);
+        setLoadingRecent(false);
+      })
+      .catch(() => setLoadingRecent(false));
   }, []);
 
   // Poll for scan results
@@ -203,6 +222,17 @@ export default function ScanRunner() {
         setScanning(false);
         scanningRef.current = false;
         if (pollRef.current) clearInterval(pollRef.current);
+        // Add to recent scans list
+        setRecentScans((prev) => [
+          {
+            id: data.id,
+            frameworkType: data.frameworkType,
+            score: data.score ?? 0,
+            riskLevel: data.riskLevel ?? "UNKNOWN",
+            completedAt: new Date().toISOString(),
+          },
+          ...prev.filter((s) => s.id !== data.id),
+        ]);
       } else if (data.status === "FAILED") {
         setError(data.errorMessage || "Scan failed");
         setScanning(false);
@@ -235,6 +265,17 @@ export default function ScanRunner() {
 
         if (data.status === "COMPLETED") {
           setResult(data);
+          // Add to recent scans list
+          setRecentScans((prev) => [
+            {
+              id: data.id,
+              frameworkType: data.frameworkType,
+              score: data.score ?? 0,
+              riskLevel: data.riskLevel ?? "UNKNOWN",
+              completedAt: new Date().toISOString(),
+            },
+            ...prev.filter((s) => s.id !== data.id),
+          ]);
         } else if (data.status === "FAILED") {
           setError(data.errorMessage || "Scan failed");
           setResult(data);
@@ -453,6 +494,78 @@ export default function ScanRunner() {
           <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
             {error}
           </div>
+        )}
+
+        {/* Recent completed scans */}
+        {!loadingRecent && recentScans.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+              Recent Scans
+            </h2>
+            <div className="space-y-2">
+              {recentScans.map((scan) => {
+                const scoreColor =
+                  scan.score >= 80
+                    ? "text-green-600"
+                    : scan.score >= 50
+                      ? "text-yellow-600"
+                      : "text-red-600";
+
+                const riskBg =
+                  scan.riskLevel === "LOW"
+                    ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+                    : scan.riskLevel === "MEDIUM"
+                      ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400"
+                      : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
+
+                const frameworkLabel = scan.frameworkType.replace(/_/g, " ");
+
+                const dateLabel = scan.completedAt
+                  ? new Date(scan.completedAt).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })
+                  : "—";
+
+                return (
+                  <div
+                    key={scan.id}
+                    className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div>
+                        <p className="text-sm font-medium">{frameworkLabel}</p>
+                        <p className="text-xs text-muted-foreground">{dateLabel}</p>
+                      </div>
+                      <span className={`text-sm font-semibold ${scoreColor}`}>
+                        {scan.score}%
+                      </span>
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${riskBg}`}
+                      >
+                        {scan.riskLevel}
+                      </span>
+                    </div>
+                    <a
+                      href={`/api/scan/${scan.id}/pdf`}
+                      className="text-xs font-medium text-primary hover:underline flex items-center gap-1"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      ↓ PDF
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {!loadingRecent && recentScans.length === 0 && (
+          <p className="mb-8 text-sm text-muted-foreground text-center">
+            No completed scans yet. Select a framework above and run your first scan.
+          </p>
         )}
 
         {/* Live narration during scan — inline thinking */}

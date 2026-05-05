@@ -114,3 +114,36 @@ export async function POST(req: NextRequest) {
     message,
   });
 }
+
+export async function GET(req: NextRequest) {
+  const session = await getSession();
+  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const { orgId } = session;
+
+  const scans = await db.scan.findMany({
+    where: {
+      orgId,
+      status: "COMPLETED",
+    },
+    include: {
+      framework: {
+        select: {
+          type: true,
+        },
+      },
+    },
+    orderBy: { completedAt: "desc" },
+    take: 10,
+  });
+
+  return Response.json({
+    scans: scans.map((scan: any) => ({
+      id: scan.id,
+      frameworkType: scan.framework?.type ?? "UNKNOWN",
+      score: scan.score ?? 0,
+      riskLevel: scan.riskLevel ?? "UNKNOWN",
+      completedAt: scan.completedAt,
+      createdAt: scan.createdAt,
+    })),
+  });
+}
