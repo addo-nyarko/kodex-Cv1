@@ -13,12 +13,21 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  Download,
+  ExternalLink,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useScanContext } from "../contexts/ScanContext";
 
 interface ScanResult {
   score: number;
   riskLevel: string;
+  framework?: string;
+  controlCounts?: {
+    passed: number;
+    failed: number;
+    noEvidence: number;
+  };
 }
 
 interface Message {
@@ -33,9 +42,10 @@ type ScanPollStatus = "idle" | "polling" | "completed" | "failed";
 export default function ChatAssistant() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { activeScan, needsClarification, clearActiveScan, setActiveScan } = useScanContext();
 
-  const scanId = searchParams.get("scanId");
-  const pendingQuestion = searchParams.get("question");
+  const scanId = searchParams.get("scanId") || activeScan?.id;
+  const pendingQuestion = searchParams.get("question") || activeScan?.pendingQuestion;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -43,14 +53,110 @@ export default function ChatAssistant() {
   const [clarificationSubmitted, setClarificationSubmitted] = useState(false);
   const [scanPollStatus, setScanPollStatus] = useState<ScanPollStatus>("idle");
   const [scanScore, setScanScore] = useState<number | null>(null);
+  const [events, setEvents] = useState<string[]>([]);
+  const [lastEventTime, setLastEventTime] = useState<number>(Date.now());
+  const [conversationMode, setConversationMode] = useState(false);
+  const [clarificationAnswer, setClarificationAnswer] = useState("");
+  const [clarificationError, setClarificationError] = useState<string | null>(null);
+  const [showClarificationSkip, setShowClarificationSkip] = useState(false);
+  const [submittingClarification, setSubmittingClarification] = useState(false);
+  const [showFrameworkSelector, setShowFrameworkSelector] = useState(false);
+  const [availableFrameworks, setAvailableFrameworks] = useState<any[]>([]);
+  const [selectingFramework, setSelectingFramework] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const eventsEndRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
   const askedQuestionRef = useRef<string | null>(null);
+  const eventsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastMessageTimeRef = useRef<number>(Date.now());
+  const clarificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clarificationQuestionTimeRef = useRef<number>(Date.now());
+  const completionHandledRef = useRef(false);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
   }, []);
+
+  // Scroll events to bottom
+  const scrollEventsToBottom = useCallback(() => {
+    setTimeout(() => eventsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+  }, []);
+
+  // Poll for events when scan is active and running
+  useEffect(() => {
+    if (!activeScan || !["QUEUED", "RUNNING"].includes(activeScan.status)) {
+      if (eventsPollRef.current) clearInterval(eventsPollRef.current);
+      return;
+    }
+
+    const pollEvents = async () => {
+      try {
+        const res = await fetch(`/api/scan/${activeScan.id}/events?limit=8`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.events && data.events.length > 0) {
+          setEvents(data.events);
+          setLastEventTime(Date.now());
+          scrollEventsToBottom();
+        }
+      } catch {
+        // Keep polling on network errors
+      }
+    };
+
+    pollEvents();
+    eventsPollRef.current = setInterval(pollEvents, 3000);
+
+    return () => {
+      if (eventsPollRef.current) clearInterval(eventsPollRef.current);
+    };
+  }, [activeScan?.id, activeScan?.status, scrollEventsToBottom]);
+
+  // Handle conversation mode idle timeout
+  useEffect(() => {
+    if (!conversationMode) return;
+
+    const resetTimer = () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(() => {
+        // If no messages sent in last 30s and feed is still active, collapse it
+        if (Date.now() - lastMessageTimeRef.current > 30000) {
+          setConversationMode(false);
+        }
+      }, 10000);
+    };
+
+    resetTimer();
+
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, [conversationMode]);
+
+  // Handle clarification question timing (show Skip after 30s)
+  useEffect(() => {
+    if (!needsClarification) {
+      setShowClarificationSkip(false);
+      if (clarificationTimerRef.current) clearTimeout(clarificationTimerRef.current);
+      return;
+    }
+
+    clarificationQuestionTimeRef.current = Date.now();
+    setClarificationAnswer("");
+    setClarificationError(null);
+    setShowClarificationSkip(false);
+
+    if (clarificationTimerRef.current) clearTimeout(clarificationTimerRef.current);
+    clarificationTimerRef.current = setTimeout(() => {
+      setShowClarificationSkip(true);
+    }, 30000);
+
+    return () => {
+      if (clarificationTimerRef.current) clearTimeout(clarificationTimerRef.current);
+    };
+  }, [needsClarification]);
 
   // Initialize with scan clarification context if present
   useEffect(() => {
@@ -72,7 +178,73 @@ export default function ChatAssistant() {
   // Reset tracking when scanId changes (new scan)
   useEffect(() => {
     askedQuestionRef.current = null;
+    completionHandledRef.current = false;
   }, [scanId]);
+
+  // Handle scan completion from context
+  useEffect(() => {
+    if (!activeScan || activeScan.status !== "COMPLETED" || completionHandledRef.current) {
+      return;
+    }
+
+    completionHandledRef.current = true;
+
+    const handleCompletion = async () => {
+      // Wait 1s before showing result card
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Count control results
+      const controlCounts = {
+        passed: 0,
+        failed: 0,
+        noEvidence: 0,
+      };
+
+      if (activeScan.controlResults && Array.isArray(activeScan.controlResults)) {
+        activeScan.controlResults.forEach((control: any) => {
+          if (control.result === "PASS") controlCounts.passed++;
+          else if (control.result === "FAIL") controlCounts.failed++;
+          else if (control.result === "NO_EVIDENCE") controlCounts.noEvidence++;
+        });
+      }
+
+      // Add result card as AI message
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: `Your ${activeScan.frameworkType.replace(/_/g, " ")} compliance scan is complete! Here's your assessment:`,
+          type: "scan-status",
+          scanResult: {
+            score: activeScan.score ?? 0,
+            riskLevel: activeScan.riskLevel ?? "UNKNOWN",
+            framework: activeScan.frameworkType,
+            controlCounts,
+          },
+        },
+      ]);
+
+      scrollToBottom();
+
+      // Add follow-up message after 1.5s
+      setTimeout(() => {
+        setMessages((m) => [
+          ...m,
+          {
+            role: "assistant",
+            content: "Would you like me to explain any of the failed controls or help you improve your compliance score?",
+            type: "normal",
+          },
+        ]);
+        scrollToBottom();
+
+        // Clear the active scan after adding follow-up
+        clearActiveScan();
+      }, 1500);
+    };
+
+    handleCompletion();
+  }, [activeScan?.status, activeScan?.id, scrollToBottom, clearActiveScan]);
 
   // Poll scan status after clarification is submitted
   useEffect(() => {
@@ -171,6 +343,65 @@ export default function ChatAssistant() {
     return true;
   }
 
+  // Detect scan intent from user message
+  function detectScanIntent(message: string): boolean {
+    const keywords = ["scan", "audit", "check compliance", "run a scan", "gdpr scan", "eu ai act", "check my project"];
+    const lower = message.toLowerCase();
+    return keywords.some(keyword => lower.includes(keyword));
+  }
+
+  // Submit clarification answer
+  async function submitClarificationAnswer(answer: string, skipQuestion: boolean = false) {
+    if (!scanId || !answer.trim()) return;
+
+    // Validate answer is likely a real answer (unless skipping)
+    if (!skipQuestion && !isLikelyAnswer(answer)) {
+      setClarificationError(
+        "That doesn't look like a compliance answer. Please describe what your system actually does."
+      );
+      return;
+    }
+
+    setSubmittingClarification(true);
+    try {
+      const res = await fetch(`/api/scan/${scanId}/clarify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer: skipQuestion ? "" : answer }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed to submit" }));
+        setClarificationError(data.error || "Failed to submit clarification");
+        setSubmittingClarification(false);
+        return;
+      }
+
+      // Success — clear form and resume polling
+      setClarificationAnswer("");
+      setClarificationError(null);
+      setSubmittingClarification(false);
+      setScanPollStatus("polling");
+
+      // AI message about resuming
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: skipQuestion
+            ? `Skipped that question. Resuming your scan...\n\n${events[events.length - 1] || "Scanning..."}`
+            : `Got it — resuming your scan.\n\n${events[events.length - 1] || "Scanning..."}`,
+          type: "scan-status",
+        },
+      ]);
+
+      scrollToBottom();
+    } catch (e) {
+      setClarificationError(e instanceof Error ? e.message : "Failed to submit");
+      setSubmittingClarification(false);
+    }
+  }
+
   // Submit clarification answer to the scan engine
   async function submitClarification(answer: string) {
     if (!scanId) return false;
@@ -213,6 +444,66 @@ export default function ChatAssistant() {
     }
   }
 
+  async function selectFramework(frameworkId: string) {
+    if (selectingFramework) return;
+    setSelectingFramework(true);
+
+    try {
+      const projectId = searchParams.get("projectId");
+      const res = await fetch("/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frameworkId,
+          ...(projectId ? { projectId } : {}),
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to start scan");
+      }
+
+      const { scanId: newScanId } = await res.json();
+
+      // Fetch the scan details
+      const scanRes = await fetch(`/api/scan/${newScanId}`);
+      if (!scanRes.ok) throw new Error("Failed to fetch scan details");
+      const scanData = await scanRes.json();
+
+      // Set activeScan in context
+      setActiveScan(scanData);
+
+      // Find framework name
+      const selectedFramework = availableFrameworks.find((f) => f.id === frameworkId);
+      const frameworkName = selectedFramework?.type.replace(/_/g, " ") || "compliance";
+
+      // Add message about starting scan
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: `Starting your ${frameworkName} scan. Watch the feed below — I'll flag anything important.`,
+          type: "scan-status",
+        },
+      ]);
+
+      setShowFrameworkSelector(false);
+      scrollToBottom();
+    } catch (e) {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: `I couldn't start the scan: ${e instanceof Error ? e.message : "Unknown error"}. Please try again from the Scan page.`,
+          type: "normal",
+        },
+      ]);
+      setShowFrameworkSelector(false);
+    }
+
+    setSelectingFramework(false);
+  }
+
   async function send() {
     if (!input.trim() || loading) return;
     const userMsg: Message = { role: "user", content: input };
@@ -221,6 +512,7 @@ export default function ChatAssistant() {
     const currentInput = input;
     setInput("");
     setLoading(true);
+    lastMessageTimeRef.current = Date.now();
 
     // If we're in clarification mode and haven't submitted yet, check intent
     if (scanId && !clarificationSubmitted) {
@@ -286,6 +578,53 @@ export default function ChatAssistant() {
         return;
       }
       setLoading(false);
+      return;
+    }
+
+    // Check for scan intent (only if no active scan)
+    if (detectScanIntent(currentInput) && !activeScan) {
+      // Fetch available frameworks
+      try {
+        const projectId = searchParams.get("projectId");
+        const frameworkRes = await fetch(`/api/frameworks${projectId ? `?projectId=${projectId}` : ""}`);
+        if (!frameworkRes.ok) throw new Error("Failed to fetch frameworks");
+        const { frameworks } = await frameworkRes.json();
+
+        if (frameworks && frameworks.length > 0) {
+          setAvailableFrameworks(frameworks);
+          setShowFrameworkSelector(true);
+
+          // Add AI message about running a scan
+          setMessages((m) => [
+            ...m,
+            {
+              role: "assistant",
+              content: "I can run a compliance scan for you.\n\nWhich framework would you like to check?",
+              type: "normal",
+            },
+          ]);
+
+          scrollToBottom();
+          setLoading(false);
+          return;
+        }
+      } catch (e) {
+        // Fall through to normal chat if framework fetch fails
+      }
+    }
+
+    // If already have an active scan and user mentions scan
+    if (detectScanIntent(currentInput) && activeScan) {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: `You already have a ${activeScan.frameworkType.replace(/_/g, " ")} scan running.\n\nWant to wait for it to finish or view the current progress?`,
+          type: "normal",
+        },
+      ]);
+      setLoading(false);
+      scrollToBottom();
       return;
     }
 
@@ -420,6 +759,109 @@ export default function ChatAssistant() {
 
       {/* Chat Area */}
       <div className="flex-1 overflow-y-auto bg-gradient-to-br from-blue-50/30 via-background to-purple-50/20 dark:from-blue-950/10 dark:via-background dark:to-purple-950/5 px-8 py-6 space-y-6">
+        {/* Verbose Event Feed */}
+        {activeScan && ["QUEUED", "RUNNING", "COMPLETED"].includes(activeScan.status) && (
+          <div
+            className={`mb-8 transition-all duration-200 overflow-hidden ${
+              conversationMode && activeScan.status !== "COMPLETED" ? "max-h-12" : "max-h-96"
+            }`}
+            style={{ opacity: conversationMode && activeScan.status !== "COMPLETED" ? 0.7 : 1 }}
+          >
+            {/* Header */}
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className={`${conversationMode && activeScan.status !== "COMPLETED" ? "text-xs" : "text-sm"} font-semibold text-foreground transition-all`}>
+                  {activeScan.frameworkType.replace(/_/g, " ")} Scan · {activeScan.status === "COMPLETED" ? "Complete" : activeScan.status === "RUNNING" ? "Running" : "Queued"}
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {activeScan.score !== null ? `${activeScan.score}%` : "—"}
+                </span>
+              </div>
+              {/* Progress bar */}
+              <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-500 ${
+                    activeScan.status === "COMPLETED" ? "bg-green-600" : "bg-blue-600"
+                  }`}
+                  style={{
+                    width: `${
+                      activeScan.status === "COMPLETED"
+                        ? "100%"
+                        : activeScan.status === "QUEUED"
+                          ? "10%"
+                          : activeScan.score !== null
+                            ? `${Math.min(activeScan.score, 95)}%`
+                            : "45%"
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Collapsed thin bar view */}
+            {conversationMode && activeScan.status !== "COMPLETED" && events.length > 0 && (
+              <div className="text-xs text-muted-foreground font-mono truncate">
+                <span className="text-muted-foreground/60">[Last event]</span>
+                <span className="mx-1">·</span>
+                <span>{events[events.length - 1]}</span>
+              </div>
+            )}
+
+            {/* Event Feed (expanded) */}
+            {(!conversationMode || activeScan.status === "COMPLETED") && (
+              <div className="bg-card border border-border rounded-xl p-4 max-h-64 overflow-y-auto space-y-1">
+                {events.length === 0 ? (
+                  <div className="text-xs text-muted-foreground italic">
+                    Initializing scan...
+                  </div>
+                ) : (
+                  <>
+                    {events.map((event, idx) => {
+                      // Opacity fade: brightest at bottom
+                      const opacityLevels = [0.2, 0.35, 0.5, 0.65, 0.8, 0.9, 0.95, 1.0];
+                      const opacity = opacityLevels[Math.min(idx, opacityLevels.length - 1)];
+
+                      // Try to extract timestamp from event if it starts with HH:MM:SS
+                      const timeMatch = event.match(/^(\d{2}:\d{2}:\d{2})\s*·\s*(.*)$/);
+                      const displayEvent = timeMatch ? timeMatch[2] : event;
+                      const timestamp = timeMatch ? timeMatch[1] : null;
+
+                      // If no timestamp, generate one (use event index for rough time)
+                      const finalTimestamp = timestamp || new Date().toLocaleTimeString("en-US", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                        hour12: false,
+                      });
+
+                      return (
+                        <div
+                          key={idx}
+                          className="text-xs text-foreground/80 font-mono transition-opacity"
+                          style={{ opacity }}
+                        >
+                          <span className="text-muted-foreground">{finalTimestamp}</span>
+                          <span className="text-muted-foreground mx-1">·</span>
+                          <span>{displayEvent}</span>
+                        </div>
+                      );
+                    })}
+
+                    {/* Pulsing indicator if no new events for 10s */}
+                    {Date.now() - lastEventTime > 10000 && (
+                      <div className="text-xs text-muted-foreground animate-pulse mt-2">
+                        Waiting for next update...
+                      </div>
+                    )}
+
+                    <div ref={eventsEndRef} />
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {messages.length === 0 && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
@@ -454,6 +896,22 @@ export default function ChatAssistant() {
             </div>
           </div>
         )}
+        {/* Framework selector (shown after AI message about running scan) */}
+        {showFrameworkSelector && availableFrameworks.length > 0 && (
+          <div className="flex gap-2 flex-wrap justify-start">
+            {availableFrameworks.map((fw) => (
+              <button
+                key={fw.id}
+                onClick={() => selectFramework(fw.id)}
+                disabled={selectingFramework}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors font-medium text-sm"
+              >
+                {fw.type.replace(/_/g, " ")}
+              </button>
+            ))}
+          </div>
+        )}
+
         {messages.map((m, i) => (
           <div key={i} className={`flex gap-3 ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             {m.role === "assistant" && (
@@ -468,12 +926,12 @@ export default function ChatAssistant() {
                     <div className="flex items-start justify-between mb-4">
                       <div>
                         <h3 className="font-semibold text-foreground mb-1">Scan Complete!</h3>
-                        <p className="text-sm text-muted-foreground">Your compliance assessment is ready</p>
+                        <p className="text-sm text-muted-foreground">Your {m.scanResult.framework?.replace(/_/g, " ") || "compliance"} assessment is ready</p>
                       </div>
                       <CheckCircle2 className="w-6 h-6 text-green-500 flex-shrink-0" />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4 mb-4">
                       <div className="bg-card/50 rounded-lg p-3 border border-border">
                         <p className="text-xs text-muted-foreground mb-1">Compliance Score</p>
                         <p
@@ -504,9 +962,53 @@ export default function ChatAssistant() {
                       </div>
                     </div>
 
-                    <p className="text-xs text-muted-foreground mt-4">
-                      View full results, download PDF reports, and see your remediation roadmap on the scan page.
-                    </p>
+                    {m.scanResult.controlCounts && (
+                      <div className="grid grid-cols-3 gap-3 mb-4">
+                        <div className="bg-card/50 rounded-lg p-3 border border-border">
+                          <p className="text-xs text-muted-foreground mb-1">Passed</p>
+                          <p className="text-lg font-bold text-green-500">{m.scanResult.controlCounts.passed}</p>
+                        </div>
+                        <div className="bg-card/50 rounded-lg p-3 border border-border">
+                          <p className="text-xs text-muted-foreground mb-1">Failed</p>
+                          <p className="text-lg font-bold text-red-500">{m.scanResult.controlCounts.failed}</p>
+                        </div>
+                        <div className="bg-card/50 rounded-lg p-3 border border-border">
+                          <p className="text-xs text-muted-foreground mb-1">No Evidence</p>
+                          <p className="text-lg font-bold text-amber-500">{m.scanResult.controlCounts.noEvidence}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 mt-4">
+                      {scanId && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => router.push(`/scans/${scanId}`)}
+                            title="View the complete scan results"
+                            aria-label="View complete scan results and detailed controls"
+                            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-green-600/20 text-green-400 rounded-lg text-sm font-medium hover:bg-green-600/30 transition-colors"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                            View Full Results
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const link = document.createElement("a");
+                              link.href = `/api/scan/${scanId}/pdf`;
+                              link.download = `scan-${scanId}.pdf`;
+                              link.click();
+                            }}
+                            title="Download PDF report"
+                            aria-label="Download scan report as PDF"
+                            className="px-4 py-2 bg-blue-600/20 text-blue-400 rounded-lg text-sm font-medium hover:bg-blue-600/30 transition-colors"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div
                     className="bg-blue-500/10 border border-blue-500/30 rounded-2xl rounded-bl-sm shadow-sm px-5 py-3 text-foreground text-sm"
@@ -539,34 +1041,127 @@ export default function ChatAssistant() {
       </div>
 
       {/* Input Area */}
-      <div className="border-t border-border bg-card p-6">
-        {isInScanMode && !clarificationSubmitted && (
-          <div className="text-xs text-yellow-500 mb-2 px-1">
+      <div className="border-t border-border bg-card p-6 space-y-4">
+        {/* Clarification Card */}
+        {needsClarification && scanId && (
+          <div className="bg-yellow-950/30 border border-yellow-700/50 rounded-xl p-4 space-y-3">
+            {/* Progress bar pulses amber */}
+            <div className="w-full h-1 bg-yellow-900/30 rounded-full overflow-hidden">
+              <div className="h-full bg-yellow-600 w-full animate-pulse" />
+            </div>
+
+            {/* Header */}
+            <div className="flex items-start gap-2">
+              <span className="text-sm text-yellow-400 font-medium">⏸ Scan paused</span>
+              <span className="text-xs text-yellow-300">Needs your input</span>
+            </div>
+
+            {/* Question */}
+            <div>
+              <p className="text-xs text-yellow-300/70 uppercase tracking-wide mb-1">
+                Control: {activeScan?.pendingControlCode || "—"}
+              </p>
+              <p className="text-sm text-foreground">
+                {activeScan?.pendingQuestion}
+              </p>
+            </div>
+
+            {/* Answer input */}
+            <div>
+              <textarea
+                value={clarificationAnswer}
+                onChange={(e) => {
+                  setClarificationAnswer(e.target.value);
+                  setClarificationError(null);
+                }}
+                placeholder="Type your answer here..."
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-yellow-600/30 resize-none"
+                rows={3}
+              />
+            </div>
+
+            {/* Error message */}
+            {clarificationError && (
+              <div className="text-xs text-yellow-300 bg-yellow-900/20 border border-yellow-700/30 rounded p-2">
+                {clarificationError}
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => submitClarificationAnswer(clarificationAnswer, false)}
+                disabled={submittingClarification || !clarificationAnswer.trim()}
+                className="flex-1 px-4 py-2 bg-yellow-600 text-white rounded-lg text-sm font-medium hover:bg-yellow-500 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              >
+                {submittingClarification ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  "Submit Answer"
+                )}
+              </button>
+
+              {showClarificationSkip && (
+                <button
+                  type="button"
+                  onClick={() => submitClarificationAnswer("", true)}
+                  disabled={submittingClarification}
+                  className="px-4 py-2 text-yellow-400 hover:text-yellow-300 text-sm font-medium transition-colors"
+                >
+                  Skip
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isInScanMode && !clarificationSubmitted && !needsClarification && (
+          <div className="text-xs text-yellow-500 px-1">
             Answer the question above to resume your scan
           </div>
         )}
-        <div className="bg-background border border-border rounded-2xl p-3 focus-within:ring-2 focus-within:ring-blue-600/20 transition-all">
+        <div className={`bg-background border border-border rounded-2xl p-3 focus-within:ring-2 focus-within:ring-blue-600/20 transition-all ${
+          needsClarification ? "opacity-50 cursor-not-allowed" : ""
+        }`}>
           <div className="flex items-end gap-2">
-            <button className="p-2 rounded-lg hover:bg-accent transition-colors flex-shrink-0">
+            <button className="p-2 rounded-lg hover:bg-accent transition-colors flex-shrink-0" disabled={needsClarification}>
               <Paperclip className="w-5 h-5 text-muted-foreground" />
             </button>
             <textarea
               className="flex-1 bg-transparent text-foreground placeholder-muted-foreground text-sm resize-none focus:outline-none min-h-[24px] max-h-[120px] py-1.5"
               placeholder={
-                isInScanMode && !clarificationSubmitted
-                  ? "Type your answer here..."
-                  : "Ask about GDPR, EU AI Act, ISO 27001..."
+                needsClarification
+                  ? "Answer the scan question above first"
+                  : isInScanMode && !clarificationSubmitted
+                    ? "Type your answer here..."
+                    : "Ask about GDPR, EU AI Act, ISO 27001..."
               }
               rows={1}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // Enter conversation mode when user starts typing (if scan is running)
+                if (activeScan && ["QUEUED", "RUNNING"].includes(activeScan.status)) {
+                  setConversationMode(true);
+                }
+              }}
+              onFocus={() => {
+                // Enter conversation mode when user focuses on input
+                if (activeScan && ["QUEUED", "RUNNING"].includes(activeScan.status)) {
+                  setConversationMode(true);
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   send();
                 }
               }}
-              disabled={loading}
+              disabled={loading || needsClarification}
             />
             <button className="p-2 rounded-lg hover:bg-accent transition-colors flex-shrink-0">
               <Smile className="w-5 h-5 text-muted-foreground" />
