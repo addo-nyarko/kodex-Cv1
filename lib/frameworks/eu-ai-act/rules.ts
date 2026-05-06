@@ -105,17 +105,28 @@ export const euAiActRules: ControlRule[] = [
         };
       }
       const hasClassification = !!ev.questionnaire["q_risk_classification"];
-      const hasRiskDoc = ev.documents.some((d) =>
-        d.text.toLowerCase().includes("risk classification") || d.fileName.toLowerCase().includes("risk")
+      // TIGHTENED: Require explicit Annex III reference, not just "risk" filename keyword
+      const hasAnnexIIIRef = ev.documents.some((d) =>
+        d.text.toLowerCase().includes("annex iii") ||
+        d.text.toLowerCase().includes("high-risk") ||
+        d.text.toLowerCase().includes("biometric") ||
+        d.text.toLowerCase().includes("safety-critical") ||
+        d.text.toLowerCase().includes("employment") ||
+        d.text.toLowerCase().includes("education")
       );
+      const hasExplicitClassification = ev.documents.some((d) =>
+        d.text.toLowerCase().includes("risk classification") &&
+        (d.text.toLowerCase().includes("high") || d.text.toLowerCase().includes("limited") || d.text.toLowerCase().includes("minimal"))
+      );
+
       return {
-        status: hasClassification ? (hasRiskDoc ? "PASS" : "PARTIAL") : "NO_EVIDENCE",
-        confidence: hasClassification && hasRiskDoc ? 0.9 : hasClassification ? 0.6 : 0.2,
-        evidenceUsed: [hasClassification ? "q_risk_classification" : "", hasRiskDoc ? "risk_assessment_doc" : ""].filter(Boolean),
-        gaps: hasRiskDoc ? [] : ["No formal risk classification document found"],
-        remediations: hasRiskDoc ? [] : ["Document your AI system's risk level per Art. 6 Annex III criteria"],
-        lawyerQuestions: ["Does our AI system fall under Annex III high-risk categories, specifically given our use in " + ev.onboarding.industry + "?"],
-        note: "Art. 6 requires risk classification for all AI systems.",
+        status: hasClassification && (hasAnnexIIIRef || hasExplicitClassification) ? "PASS" : hasClassification ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: hasClassification && (hasAnnexIIIRef || hasExplicitClassification) ? 0.9 : hasClassification ? 0.5 : 0.2,
+        evidenceUsed: [hasClassification ? "q_risk_classification" : "", hasAnnexIIIRef ? "risk_assessment_with_annex_iii_criteria" : ""].filter(Boolean),
+        gaps: !hasAnnexIIIRef ? ["Document does not explicitly reference Annex III high-risk categories or classification rationale"] : [],
+        remediations: !hasAnnexIIIRef ? ["Document risk classification explicitly referencing Annex III categories (biometric, safety-critical, employment, education, etc.) with justification for classification"] : [],
+        lawyerQuestions: ["Does our AI system fall under Annex III high-risk categories — specifically " + (ev.onboarding.dataCategories.join(", ") || "identify applicable domains") + "?"],
+        note: `Art. 6: Risk classification ${hasAnnexIIIRef ? "with Annex III criteria found" : hasExplicitClassification ? "explicitly stated but needs Annex III reference" : "needs Annex III alignment"}.`,
       };
     },
   },
@@ -127,12 +138,10 @@ export const euAiActRules: ControlRule[] = [
     evidenceKeys: ["technical_doc", "system_architecture"],
     articleRefs: { EU_AI_ACT: "Art. 11" },
     check: (ev) => {
-      const hasTechDoc = hasDoc(ev, "technical documentation", "architecture", "system design", "model card");
-      // GitHub: check for architecture docs, README, and doc files
-      const repoHasArchDocs = hasGitSignal(ev, "hasArchitectureDocs");
-      const repoHasReadme = hasGitSignal(ev, "hasReadme");
-      const gh = ev.codeSignals?.github as Record<string, unknown> | undefined;
-      const repoDocCount = (gh?.docCount as number) ?? 0;
+      // TIGHTENED: Require ALL THREE components for PASS, not just any documentation
+      const hasTrainingDataDesc = hasDoc(ev, "training data", "training dataset", "training methodology", "data sources");
+      const hasPerformanceMetrics = hasDoc(ev, "performance", "accuracy", "f1 score", "recall", "precision", "metrics", "test results");
+      const hasLimitations = hasDoc(ev, "limitations", "constraints", "known issues", "model card", "failure modes");
 
       if (!usesHighRiskAI(ev)) {
         return {
@@ -146,32 +155,65 @@ export const euAiActRules: ControlRule[] = [
         };
       }
 
-      const hasAnyTechDoc = hasTechDoc || repoHasArchDocs;
       const sources: string[] = [];
-      if (hasTechDoc) sources.push("technical_doc");
-      if (repoHasArchDocs) sources.push("GitHub: architecture docs");
-      if (repoHasReadme) sources.push("GitHub: README");
+      if (hasTrainingDataDesc) sources.push("training_data_description");
+      if (hasPerformanceMetrics) sources.push("performance_metrics");
+      if (hasLimitations) sources.push("system_limitations");
 
-      if (hasAnyTechDoc) {
+      const componentsCount = [hasTrainingDataDesc, hasPerformanceMetrics, hasLimitations].filter(Boolean).length;
+
+      if (componentsCount === 3) {
         return {
-          status: hasTechDoc ? "PASS" : "PARTIAL",
-          confidence: hasTechDoc ? 0.85 : 0.6,
+          status: "PASS",
+          confidence: 0.95,
           evidenceUsed: sources,
-          gaps: hasTechDoc ? [] : ["Architecture docs found in repo but formal Art. 11 documentation needed"],
-          remediations: hasTechDoc ? [] : ["Expand existing docs into full Annex IV technical documentation including training data, architecture, and performance metrics"],
-          lawyerQuestions: ["What specific information must our technical documentation contain per Art. 11 and Annex IV given our system type?"],
-          note: `Technical documentation ${hasTechDoc ? "found" : "partially available from repo (architecture docs detected)"}.`,
+          gaps: [],
+          remediations: [],
+          lawyerQuestions: [],
+          note: "Art. 11: Complete technical documentation with training data, performance metrics, and limitations.",
+        };
+      }
+
+      if (componentsCount === 2) {
+        return {
+          status: "PARTIAL",
+          confidence: 0.65,
+          evidenceUsed: sources,
+          gaps: [
+            ...(!hasTrainingDataDesc ? ["Missing: Training data description (sources, size, preprocessing)"] : []),
+            ...(!hasPerformanceMetrics ? ["Missing: Performance metrics (accuracy, test results)"] : []),
+            ...(!hasLimitations ? ["Missing: Known limitations and failure modes"] : []),
+          ],
+          remediations: ["Complete Annex IV documentation with all three components: training data provenance, measured performance metrics, and documented limitations"],
+          lawyerQuestions: ["What specific metrics and thresholds must we document to satisfy Annex IV requirements for our system type?"],
+          note: `Art. 11: ${componentsCount}/3 required components present. Documentation incomplete.`,
+        };
+      }
+
+      if (componentsCount === 1) {
+        return {
+          status: "PARTIAL",
+          confidence: 0.4,
+          evidenceUsed: sources,
+          gaps: [
+            ...(!hasTrainingDataDesc ? ["Missing: Training data description (sources, size, preprocessing)"] : []),
+            ...(!hasPerformanceMetrics ? ["Missing: Performance metrics (accuracy, test results)"] : []),
+            ...(!hasLimitations ? ["Missing: Known limitations and failure modes"] : []),
+          ],
+          remediations: ["Develop comprehensive Annex IV technical documentation covering: (1) training data sources and methodology, (2) performance metrics with test evidence, (3) documented limitations"],
+          lawyerQuestions: ["What specific metrics and thresholds must we document to satisfy Annex IV requirements for our system type?"],
+          note: `Art. 11: Only 1/3 required components. Documentation significantly incomplete.`,
         };
       }
 
       return {
         status: "FAIL",
         confidence: 0.9,
-        evidenceUsed: sources,
-        gaps: ["High-risk AI system lacks Art. 11 technical documentation"],
-        remediations: ["Create Annex IV technical documentation including system description, training data, architecture, and performance metrics"],
-        lawyerQuestions: ["What specific information must our technical documentation contain per Art. 11 and Annex IV given our system type?"],
-        note: `High-risk AI: technical documentation missing.${repoDocCount > 0 ? ` (${repoDocCount} doc files in repo, but none cover Art. 11 requirements)` : ""}`,
+        evidenceUsed: [],
+        gaps: ["High-risk AI system lacks Art. 11 Annex IV technical documentation — no training data, performance metrics, or limitations documented"],
+        remediations: ["Create formal Annex IV technical documentation with: training data provenance, measured performance metrics, documented limitations, system architecture, and use case description"],
+        lawyerQuestions: ["What is the minimum required scope of Annex IV documentation given our AI system's risk classification and use case?"],
+        note: "Art. 11: Technical documentation missing all required components for high-risk AI systems.",
       };
     },
   },
@@ -194,35 +236,34 @@ export const euAiActRules: ControlRule[] = [
           note: "Company does not use AI — Art. 13 transparency not applicable.",
         };
       }
-      const hasTransparency = hasDoc(ev, "ai disclosure", "automated", "ai-assisted", "transparency");
-      const hasUserDoc = hasDoc(ev, "user guide", "user manual", "instructions for use");
-      // GitHub: README and API docs can serve as user documentation
-      const repoHasReadme = hasGitSignal(ev, "hasReadme");
+      // TIGHTENED: Require disclosure AT POINT OF USE (UI/UX), not just policy existence
+      const hasPointOfUseDisclosure = hasDoc(ev, "ai disclosure", "ai-generated", "automated decision", "you are interacting", "this result was generated", "ai-powered");
+      const hasUserDocWithAI = hasDoc(ev, "user guide", "user manual", "instructions", "capability", "ai system");
+      // Code signals: UI/UX patterns that indicate disclosure implementation
       const repoHasApiDocs = hasGitSignal(ev, "hasApiDocs");
 
-      const hasAnyUserDoc = hasUserDoc || repoHasReadme || repoHasApiDocs;
       const sources: string[] = [];
-      if (hasTransparency) sources.push("transparency_notice");
-      if (hasUserDoc) sources.push("user_documentation");
-      if (repoHasReadme) sources.push("GitHub: README");
-      if (repoHasApiDocs) sources.push("GitHub: API documentation");
+      if (hasPointOfUseDisclosure) sources.push("point_of_use_ai_disclosure");
+      if (hasUserDocWithAI) sources.push("user_documentation_with_ai_explanation");
+      if (repoHasApiDocs) sources.push("GitHub: API documentation (system integration)");
+
+      const hasFullDisclosure = hasPointOfUseDisclosure && hasUserDocWithAI;
+      const hasPartialDisclosure = (hasPointOfUseDisclosure || hasUserDocWithAI) && !hasFullDisclosure;
 
       return {
-        status: hasTransparency && hasAnyUserDoc ? "PASS" : hasTransparency || hasAnyUserDoc ? "PARTIAL" : "NO_EVIDENCE",
-        confidence: hasTransparency && hasAnyUserDoc ? 0.9 : hasTransparency || hasAnyUserDoc ? 0.5 : 0.2,
+        status: hasFullDisclosure ? "PASS" : hasPartialDisclosure ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: hasFullDisclosure ? 0.9 : hasPartialDisclosure ? 0.5 : 0.2,
         evidenceUsed: sources,
         gaps: [
-          ...(!hasTransparency ? ["No AI transparency disclosure found"] : []),
-          ...(!hasAnyUserDoc ? ["No user documentation for AI system found"] : []),
+          ...(!hasPointOfUseDisclosure ? ["No evidence of AI disclosure at point of use (in UI/output)"] : []),
+          ...(!hasUserDocWithAI ? ["No user-facing documentation explaining AI involvement"] : []),
         ],
         remediations: [
-          ...(!hasTransparency ? ["Add clear disclosure that users are interacting with or being evaluated by an AI system"] : []),
-          ...(!hasAnyUserDoc ? ["Create user-facing documentation explaining AI system capabilities and limitations"] : []),
+          ...(!hasPointOfUseDisclosure ? ["Implement clear disclosure at point of AI use (e.g., 'This recommendation was generated by AI', 'AI-assisted analysis')"] : []),
+          ...(!hasUserDocWithAI ? ["Create user documentation explaining: AI system involvement, how it works, its capabilities and limitations, when recommendations should be verified"] : []),
         ],
-        lawyerQuestions: ["What specific disclosures are required under Art. 13 for our AI system type and use case?"],
-        note: hasTransparency || hasAnyUserDoc
-          ? `Transparency evidence found${repoHasReadme || repoHasApiDocs ? " (including repo documentation)" : ""}.`
-          : "Art. 13 requires transparent, understandable information about high-risk AI systems.",
+        lawyerQuestions: ["What specific disclosure language satisfies Art. 13 for our AI use case — must we label every AI-generated output?"],
+        note: `Art. 13: Transparency ${hasFullDisclosure ? "at point of use and documented" : hasPartialDisclosure ? "partially implemented" : "not found"}.`,
       };
     },
   },
@@ -234,8 +275,13 @@ export const euAiActRules: ControlRule[] = [
     evidenceKeys: ["q_human_oversight", "oversight_procedures"],
     articleRefs: { EU_AI_ACT: "Art. 14" },
     check: (ev) => {
+      // TIGHTENED: Require BOTH policy AND code signals (escalation/override implementation), not just policy
       const hasOversight = !!ev.questionnaire["q_human_oversight"];
-      const hasProc = hasDoc(ev, "human oversight", "review process", "escalation", "human-in-the-loop");
+      const hasProc = hasDoc(ev, "human oversight", "review process", "escalation", "human-in-the-loop", "approval", "intervention");
+      // Code signals: check for escalation/override mechanisms (auth checks, conditional logic, approval workflows)
+      const hasAuth = hasGitSignal(ev, "hasAuth");
+      const hasInputValidation = hasGitSignal(ev, "hasInputValidation");
+
       if (!usesHighRiskAI(ev)) {
         return {
           status: "PASS",
@@ -247,14 +293,29 @@ export const euAiActRules: ControlRule[] = [
           note: "Art. 14 oversight requirements apply primarily to high-risk AI systems.",
         };
       }
+
+      const sources: string[] = [];
+      if (hasOversight) sources.push("q_human_oversight");
+      if (hasProc) sources.push("oversight_procedures");
+      if (hasAuth) sources.push("GitHub: authentication/authorization for escalation");
+      if (hasInputValidation) sources.push("GitHub: input validation for human review");
+
+      const hasCodeSignals = hasAuth || hasInputValidation;
+
       return {
-        status: hasOversight && hasProc ? "PASS" : hasOversight ? "PARTIAL" : "NO_EVIDENCE",
-        confidence: hasOversight && hasProc ? 0.9 : 0.4,
-        evidenceUsed: [hasOversight ? "q_human_oversight" : "", hasProc ? "oversight_procedures" : ""].filter(Boolean),
-        gaps: hasProc ? [] : ["No documented human oversight procedures for AI system"],
-        remediations: hasProc ? [] : ["Document human oversight procedures including who reviews AI outputs, escalation paths, and override mechanisms"],
-        lawyerQuestions: ["What level of human oversight satisfies Art. 14 for our specific AI use case — does manager review qualify as 'meaningful human oversight'?"],
-        note: `Human oversight: ${hasOversight && hasProc ? "documented" : "insufficient"}.`,
+        status: hasOversight && hasProc && hasCodeSignals ? "PASS" : (hasOversight && hasProc) || (hasProc && hasCodeSignals) ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: hasOversight && hasProc && hasCodeSignals ? 0.95 : (hasOversight && hasProc) ? 0.6 : 0.3,
+        evidenceUsed: sources,
+        gaps: [
+          ...(!hasProc ? ["No documented human oversight procedures"] : []),
+          ...(!hasCodeSignals ? ["No implementation evidence for escalation/override mechanisms in codebase"] : []),
+        ],
+        remediations: [
+          ...(!hasProc ? ["Document human oversight procedures: who reviews, approval workflow, escalation triggers, override mechanisms"] : []),
+          ...(!hasCodeSignals ? ["Implement technical escalation/override mechanisms: approval queues, human review gates, authorization checks"] : []),
+        ],
+        lawyerQuestions: ["What level of human oversight satisfies Art. 14 — must every AI decision be human-reviewable, or only high-impact decisions?"],
+        note: `Art. 14: Human oversight ${hasOversight && hasProc && hasCodeSignals ? "documented and implemented" : hasProc ? "policy documented but no implementation code signals" : "insufficient evidence"}.`,
       };
     },
   },

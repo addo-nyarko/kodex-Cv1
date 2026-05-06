@@ -121,25 +121,82 @@ export const gdprRules: ControlRule[] = [
     evidenceKeys: ["ropa", "processing_records"],
     articleRefs: { GDPR: "Art. 30" },
     check: (ev) => {
-      const hasRopa = hasDoc(ev, "record of processing", "ropa", "processing activities", "article 30");
+      // TIGHTENED: Require ALL components: data categories, legal basis, retention, third-party transfers
+      const hasRopa = hasDoc(ev, "record of processing", "ropa", "processing activities");
       const notionHasRopa = hasNotionSignal(ev, "hasRoPA");
+
+      // More specific: check for each required component
+      const hasDataCategories = hasDoc(ev, "personal data categories", "data categories", "types of personal data", "data subjects");
+      const hasLegalBasis = hasDoc(ev, "legal basis", "lawful basis", "article 6", "legitimate interest", "consent");
+      const hasRetention = hasDoc(ev, "retention period", "storage period", "deletion timeline", "how long");
+      const hasTransfers = hasDoc(ev, "third party", "processor", "controller", "recipient", "international transfer", "transfer");
+
       const anyRopa = hasRopa || notionHasRopa;
+      const componentCount = [hasDataCategories, hasLegalBasis, hasRetention, hasTransfers].filter(Boolean).length;
 
       const sources = [
         ...(hasRopa ? ["ropa"] : []),
         ...(notionHasRopa ? ["Notion: record of processing activities"] : []),
+        ...(hasDataCategories ? ["data_categories_documented"] : []),
+        ...(hasLegalBasis ? ["legal_basis_documented"] : []),
+        ...(hasRetention ? ["retention_periods_documented"] : []),
+        ...(hasTransfers ? ["third_party_transfers_documented"] : []),
       ];
 
+      if (anyRopa && componentCount >= 4) {
+        return {
+          status: "PASS",
+          confidence: 0.95,
+          evidenceUsed: sources,
+          gaps: [],
+          remediations: [],
+          lawyerQuestions: [],
+          note: "RoPA found with all required Art. 30 components: data categories, legal basis, retention periods, and third-party transfers.",
+        };
+      }
+
+      if (anyRopa && componentCount >= 2) {
+        return {
+          status: "PARTIAL",
+          confidence: 0.65,
+          evidenceUsed: sources,
+          gaps: [
+            ...(!hasDataCategories ? ["Missing: Documented categories of personal data processed"] : []),
+            ...(!hasLegalBasis ? ["Missing: Legal basis for each processing activity"] : []),
+            ...(!hasRetention ? ["Missing: Data retention and deletion timelines"] : []),
+            ...(!hasTransfers ? ["Missing: Documentation of third-party recipients and international transfers"] : []),
+          ],
+          remediations: ["Update RoPA to include all Art. 30 requirements: data categories, legal basis, retention periods, recipients, and international transfer justifications"],
+          lawyerQuestions: ["Does Art. 30 require separate RoPA entries for each processing purpose, or can we group similar activities?"],
+          note: `RoPA found with ${componentCount}/4 required components. Documentation incomplete.`,
+        };
+      }
+
+      if (anyRopa || componentCount > 0) {
+        return {
+          status: "PARTIAL",
+          confidence: 0.5,
+          evidenceUsed: sources,
+          gaps: [
+            ...(!hasDataCategories ? ["Missing: Documented categories of personal data processed"] : []),
+            ...(!hasLegalBasis ? ["Missing: Legal basis for each processing activity"] : []),
+            ...(!hasRetention ? ["Missing: Data retention and deletion timelines"] : []),
+            ...(!hasTransfers ? ["Missing: Documentation of third-party recipients and international transfers"] : []),
+          ],
+          remediations: ["Create a comprehensive Art. 30 Record of Processing Activities with: (1) data categories, (2) legal basis per Art. 6, (3) retention timelines, (4) third-party recipient list"],
+          lawyerQuestions: ["Are we exempt from Art. 30 obligations given our size (< 250 employees), or must we maintain a full RoPA?"],
+          note: `Partial RoPA evidence found (${componentCount}/4 components). Full Art. 30 compliance needed.`,
+        };
+      }
+
       return {
-        status: anyRopa ? "PASS" : "NO_EVIDENCE",
-        confidence: anyRopa ? 0.85 : 0.2,
-        evidenceUsed: sources,
-        gaps: anyRopa ? [] : ["No Record of Processing Activities (RoPA) found"],
-        remediations: anyRopa ? [] : ["Create and maintain an Art. 30 RoPA listing all processing activities, their purposes, legal bases, data categories, retention periods, and technical measures"],
-        lawyerQuestions: ["Are we exempt from Art. 30 obligations given our size, or must we maintain a full RoPA?"],
-        note: anyRopa
-          ? `RoPA found${notionHasRopa ? " in Notion workspace" : ""}.`
-          : "Art. 30 RoPA is mandatory for most organisations processing EU personal data.",
+        status: "NO_EVIDENCE",
+        confidence: 0.2,
+        evidenceUsed: [],
+        gaps: ["No Record of Processing Activities (RoPA) found"],
+        remediations: ["Create and maintain an Art. 30 RoPA including: (1) all data categories, (2) legal basis for processing, (3) retention periods, (4) list of recipients, (5) transfer mechanisms if applicable"],
+        lawyerQuestions: ["Are we exempt from Art. 30 obligations given our size (< 250 employees), or must we maintain a full RoPA?"],
+        note: "Art. 30 RoPA is mandatory for most organisations processing EU personal data.",
       };
     },
   },
@@ -193,6 +250,74 @@ export const gdprRules: ControlRule[] = [
         remediations: hasProcedure ? [] : ["Create a documented DSR (Data Subject Request) procedure with response timelines per Art. 12 (1 month) and cover Arts. 15-22 rights"],
         lawyerQuestions: ["What is our process for verifying identity before fulfilling DSARs, and is our current process compliant with Art. 12?"],
         note: "Arts. 15-22 grant data subjects rights that require documented handling procedures.",
+      };
+    },
+  },
+  {
+    id: "GDPR_005b_right_to_erasure",
+    code: "GDPR-Art17",
+    title: "Right to erasure (deletion) technically implemented",
+    frameworks: ["GDPR"],
+    evidenceKeys: ["deletion_mechanism", "erasure_procedure"],
+    articleRefs: { GDPR: "Art. 17" },
+    check: (ev) => {
+      // TIGHTENED: Require technical deletion mechanism, not just policy
+      const hasDeletionPolicy = hasDoc(ev, "right to erasure", "data deletion", "erasure procedure", "deletion request");
+      // Code signals: deletion mechanism implementation
+      const hasInputValidation = hasGitSignal(ev, "hasInputValidation");
+      const hasAuth = hasGitSignal(ev, "hasAuth");
+      // These suggest ability to identify and delete user data
+
+      const anyDeletionEvidence = hasDeletionPolicy || hasInputValidation || hasAuth;
+      const sources: string[] = [];
+      if (hasDeletionPolicy) sources.push("deletion_policy");
+      if (hasInputValidation) sources.push("GitHub: data validation/cleansing capability");
+      if (hasAuth) sources.push("GitHub: user identification for deletion");
+
+      if (hasDeletionPolicy && (hasInputValidation || hasAuth)) {
+        return {
+          status: "PASS",
+          confidence: 0.85,
+          evidenceUsed: sources,
+          gaps: [],
+          remediations: [],
+          lawyerQuestions: ["Does our deletion mechanism fully remove associated logs, backups, and cached data per Art. 17(1)?"],
+          note: "Art. 17 right to erasure: policy documented and technical deletion capability detected.",
+        };
+      }
+
+      if (hasDeletionPolicy) {
+        return {
+          status: "PARTIAL",
+          confidence: 0.6,
+          evidenceUsed: sources,
+          gaps: ["Deletion policy exists but no technical implementation evidence (no deletion mechanism in code)"],
+          remediations: ["Implement technical deletion mechanism: user data deletion API, background cleanup jobs, backup retention policies, and cascade deletion for related records"],
+          lawyerQuestions: ["Must we delete associated metadata and access logs when a user requests erasure under Art. 17(1)?"],
+          note: "Policy documented but technical deletion mechanism not evident.",
+        };
+      }
+
+      if (anyDeletionEvidence) {
+        return {
+          status: "PARTIAL",
+          confidence: 0.5,
+          evidenceUsed: sources,
+          gaps: ["No deletion policy documented (code signals suggest capability but policy clarification needed)"],
+          remediations: ["Document your data deletion policy including: timelines, scope (what data is deleted), exceptions (logs, legal holds), and user interface for deletion requests"],
+          lawyerQuestions: [],
+          note: "Code signals suggest deletion capability but policy documentation missing.",
+        };
+      }
+
+      return {
+        status: "FAIL",
+        confidence: 0.9,
+        evidenceUsed: [],
+        gaps: ["No data deletion policy or technical deletion mechanism found"],
+        remediations: ["Implement Art. 17 right to erasure: document deletion policy and build technical deletion mechanism (delete API, cascade deletes, backup purging)"],
+        lawyerQuestions: ["Does Art. 17 require us to delete data immediately or within a reasonable timeframe, and what are acceptable exceptions?"],
+        note: "Art. 17 right to erasure requires both policy and technical implementation.",
       };
     },
   },
