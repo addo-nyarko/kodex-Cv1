@@ -195,7 +195,7 @@ export default async function DashboardHome() {
         {/* Action Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Link
-            href="/scan"
+            href="/projects"
             className="group bg-blue-600 text-white rounded-xl p-6 hover:bg-blue-500 hover:shadow-lg transition-all hover:-translate-y-0.5"
           >
             <div className="bg-white/20 w-12 h-12 rounded-lg flex items-center justify-center mb-4">

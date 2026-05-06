@@ -494,7 +494,7 @@ model Scan {
 
   org            Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
   framework      Framework           @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
-  project        Project?            @relation("ProjectScans", fields: [projectId], references: [id], onDelete: SetNull)
+  project        Project?            @relation("ProjectScans", fields: [projectId], references: [id], onDelete: Cascade)
   controlResults ScanControlResult[]
   clarifications ScanClarification[]
 

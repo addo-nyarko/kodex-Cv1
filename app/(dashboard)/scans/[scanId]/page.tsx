@@ -59,6 +59,7 @@ interface ScanData {
   completedAt: string | null;
   staleEvidence: boolean;
   staleSources: string[];
+  errorMessage: string | null;
 }
 
 const STATUS_ICONS = {
@@ -189,6 +190,21 @@ export default function ScanResultsPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-8 py-8">
+        {/* Failed Scan Error Banner */}
+        {scan.status === "FAILED" && (
+          <div className="mb-8 p-4 bg-red-500/10 border border-red-500/30 rounded-lg flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-red-900 dark:text-red-200">
+                This scan failed
+              </p>
+              <p className="text-sm text-red-800 dark:text-red-300 mt-1">
+                {scan.errorMessage ? `Reason: ${scan.errorMessage}` : "An unknown error occurred during the scan."}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Stale Evidence Warning */}
         {scan.staleEvidence && (
           <div className="mb-8 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-start gap-3">
