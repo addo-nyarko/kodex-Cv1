@@ -18,6 +18,7 @@ type ScanResult = {
 
 type ScanContextType = {
   activeScan: ScanResult | null;
+  events: string[];
   needsClarification: boolean;
   clarificationQuestion: string | null;
   clarificationControlCode: string | null;
@@ -30,8 +31,10 @@ const ScanContext = createContext<ScanContextType | undefined>(undefined);
 
 export function ScanProvider({ children }: { children: React.ReactNode }) {
   const [activeScan, setActiveScan] = useState<ScanResult | null>(null);
+  const [events, setEvents] = useState<string[]>([]);
   const [isPolling, setIsPolling] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const eventCountRef = useRef(0);
 
   // Hydrate from sessionStorage on mount
   useEffect(() => {
@@ -48,21 +51,31 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Poll scan status every 5s when scan is active and not already completed
+  // Poll scan status and events every 3s when scan is active
   const pollScan = useCallback(async () => {
     if (!activeScan || !["QUEUED", "RUNNING", "AWAITING_CLARIFICATION"].includes(activeScan.status)) {
       return;
     }
 
     try {
-      const res = await fetch(`/api/scan/${activeScan.id}`);
+      const res = await fetch(`/api/scan/status/${activeScan.id}?eventsSince=${eventCountRef.current}`);
       if (!res.ok) return;
-      const updated = await res.json();
-      setActiveScan(updated);
-      sessionStorage.setItem("activeScan", JSON.stringify(updated));
+      const data = await res.json();
 
-      // Clear if completed
-      if (updated.status === "COMPLETED" || updated.status === "FAILED") {
+      // Update scan state
+      setActiveScan(data);
+      sessionStorage.setItem("activeScan", JSON.stringify(data));
+
+      // Accumulate events
+      if (data.events && data.events.length > 0) {
+        setEvents((prev) => [...prev, ...data.events]);
+      }
+      if (data.eventCount) {
+        eventCountRef.current = data.eventCount;
+      }
+
+      // Clear if completed or failed
+      if (data.status === "COMPLETED" || data.status === "FAILED") {
         setIsPolling(false);
         if (pollRef.current) clearInterval(pollRef.current);
       }
@@ -71,7 +84,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     }
   }, [activeScan]);
 
-  // Set up polling when scan is active
+  // Set up polling when scan is active (3s interval)
   useEffect(() => {
     if (!activeScan || !["QUEUED", "RUNNING", "AWAITING_CLARIFICATION"].includes(activeScan.status)) {
       setIsPolling(false);
@@ -83,7 +96,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     }
 
     setIsPolling(true);
-    pollRef.current = setInterval(pollScan, 5000);
+    pollRef.current = setInterval(pollScan, 3000);
 
     return () => {
       if (pollRef.current) {
@@ -100,6 +113,8 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
   const clearActiveScan = useCallback(() => {
     setActiveScan(null);
+    setEvents([]);
+    eventCountRef.current = 0;
     sessionStorage.removeItem("activeScan");
     setIsPolling(false);
     if (pollRef.current) {
@@ -114,6 +129,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
 
   const value: ScanContextType = {
     activeScan,
+    events,
     needsClarification,
     clarificationQuestion,
     clarificationControlCode,

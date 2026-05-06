@@ -68,15 +68,12 @@ export default function ScanRunner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId");
-  const { activeScan, needsClarification, clarificationQuestion, clarificationControlCode, setActiveScan } = useScanContext();
+  const { activeScan, events: contextEvents, needsClarification, clarificationQuestion, clarificationControlCode, setActiveScan } = useScanContext();
 
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [scanning, setScanning] = useState(false);
-  const [allScanIds, setAllScanIds] = useState<string[]>([]);
-  const [completedScanIds, setCompletedScanIds] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ScanResult | null>(null);
-  const [events, setEvents] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expandedControl, setExpandedControl] = useState<string | null>(null);
   const [connectedIntegrations, setConnectedIntegrations] = useState<IntegrationStatus[]>([]);
@@ -92,7 +89,6 @@ export default function ScanRunner() {
   const [loadingRecent, setLoadingRecent] = useState(true);
   const [clarificationAnswer, setClarificationAnswer] = useState("");
   const [submittingClarification, setSubmittingClarification] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scanningRef = useRef(false);
 
   // Restore scan on mount if activeScan exists in context
@@ -100,18 +96,10 @@ export default function ScanRunner() {
     if (activeScan) {
       setResult(activeScan);
 
-      // If scan is still running, resume polling
+      // If scan is still running, show scanning state
       if (["QUEUED", "RUNNING"].includes(activeScan.status)) {
         setScanning(true);
         scanningRef.current = true;
-        eventCountRef.current = 0;
-
-        // Resume polling
-        if (allScanIds.length > 0) {
-          pollRef.current = setInterval(() => pollAllScans(allScanIds), 2000);
-        } else if (activeScan.id) {
-          pollRef.current = setInterval(() => pollProgress(activeScan.id), 2000);
-        }
       }
 
       // If awaiting clarification, show modal immediately
@@ -170,117 +158,16 @@ export default function ScanRunner() {
       .catch(() => setLoadingRecent(false));
   }, [projectId]);
 
-  // Poll for scan results
-  const pollScan = useCallback(async (id: string) => {
-    try {
-      const res = await fetch(`/api/scan/status/${id}`);
-      if (!res.ok) return;
-      const data: ScanResult = await res.json();
+  // Polling is now handled by ScanContext
 
-      if (data.status === "COMPLETED") {
-        setResult(data);
-        setScanning(false);
-        if (pollRef.current) clearInterval(pollRef.current);
-      } else if (data.status === "FAILED") {
-        setError(data.errorMessage || "Scan failed");
-        setScanning(false);
-        if (pollRef.current) clearInterval(pollRef.current);
-      } else if (data.status === "AWAITING_CLARIFICATION") {
-        setResult(data);
-        setScanning(false);
-        if (pollRef.current) clearInterval(pollRef.current);
-      }
-    } catch {
-      // Keep polling
-    }
-  }, []);
-
-  // Track how many events we've already shown (for incremental polling)
-  const eventCountRef = useRef(0);
-
-  /** Poll all scan IDs in a multi-framework scan */
-  const pollAllScans = useCallback(async (scanIds: string[]) => {
-    const newCompleted = new Set(completedScanIds);
-    let allDone = true;
-    let hasAwaiting = false;
-    let awaitingScanId: string | null = null;
-    let awaitingQuestion: string | null = null;
-
-    for (const id of scanIds) {
-      if (newCompleted.has(id)) continue; // Already completed
-
-      try {
-        const res = await fetch(`/api/scan/status/${id}?eventsSince=${eventCountRef.current}`);
-        if (!res.ok) {
-          allDone = false;
-          continue;
-        }
-        const data = await res.json();
-
-        // Append new narration events
-        if (data.events && data.events.length > 0) {
-          setEvents((prev) => [...prev, ...data.events]);
-        }
-        if (data.eventCount) {
-          eventCountRef.current = data.eventCount;
-        }
-
-        // Check terminal states for this scan
-        if (data.status === "COMPLETED") {
-          newCompleted.add(id);
-          setActiveScan(data);
-          // Add to recent scans list
-          setRecentScans((prev) => [
-            {
-              id: data.id,
-              frameworkType: data.frameworkType,
-              score: data.score ?? 0,
-              riskLevel: data.riskLevel ?? "UNKNOWN",
-              completedAt: new Date().toISOString(),
-            },
-            ...prev.filter((s) => s.id !== data.id),
-          ]);
-        } else if (data.status === "FAILED") {
-          newCompleted.add(id);
-          setActiveScan(data);
-          setError(data.errorMessage || `Scan ${data.frameworkType} failed`);
-        } else if (data.status === "AWAITING_CLARIFICATION") {
-          newCompleted.add(id);
-          setActiveScan(data);
-          hasAwaiting = true;
-          awaitingScanId = id;
-          awaitingQuestion = data.pendingQuestion;
-          // Store this scan for the clarification UI
-          setResult(data);
-        } else {
-          allDone = false;
-          setActiveScan(data);
-        }
-      } catch {
-        // Keep polling on network errors
-        allDone = false;
-      }
-    }
-
-    setCompletedScanIds(newCompleted);
-
-    // Stop polling only when all scans are done
-    if (allDone && !hasAwaiting) {
-      setScanning(false);
-      scanningRef.current = false;
-      if (pollRef.current) clearInterval(pollRef.current);
-    }
-  }, [completedScanIds, router]);
+  // Polling is now centralized in ScanContext — removed local polling functions
 
   async function startScan() {
     if (selectedIds.size === 0) return;
     setScanning(true);
     scanningRef.current = true;
     setResult(null);
-    setEvents([]);
     setError(null);
-    eventCountRef.current = 0;
-    setCompletedScanIds(new Set());
 
     const ids = Array.from(selectedIds);
 
@@ -309,14 +196,8 @@ export default function ScanRunner() {
 
       const data = await res.json();
       const newScanId = data.scanId;
-      const scanIds = data.scanIds ?? [newScanId];
-      setAllScanIds(scanIds);
 
-      if (data.message) {
-        setEvents([data.message]);
-      }
-
-      // Save initial scan state to context
+      // Save initial scan state to context (will trigger polling via ScanContext)
       const initialScan: ScanResult = {
         id: newScanId,
         status: "QUEUED",
@@ -331,9 +212,6 @@ export default function ScanRunner() {
         shadowPass: null,
       };
       setActiveScan(initialScan);
-
-      // Start polling for progress + results across all scan IDs
-      pollRef.current = setInterval(() => pollAllScans(scanIds), 2000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start scan");
       setScanning(false);
@@ -341,112 +219,7 @@ export default function ScanRunner() {
     }
   }
 
-  /** Poll for scan progress (events + status) */
-  async function pollProgress(id: string) {
-    try {
-      const res = await fetch(`/api/scan/status/${id}?eventsSince=${eventCountRef.current}`);
-      if (!res.ok) return;
-      const data = await res.json();
 
-      // Append new narration events
-      if (data.events && data.events.length > 0) {
-        setEvents((prev) => [...prev, ...data.events]);
-        eventCountRef.current = data.eventCount;
-      }
-
-      // Check terminal states
-      if (data.status === "COMPLETED") {
-        setResult(data);
-        setActiveScan(data);
-        setScanning(false);
-        scanningRef.current = false;
-        if (pollRef.current) clearInterval(pollRef.current);
-        // Add to recent scans list
-        setRecentScans((prev) => [
-          {
-            id: data.id,
-            frameworkType: data.frameworkType,
-            score: data.score ?? 0,
-            riskLevel: data.riskLevel ?? "UNKNOWN",
-            completedAt: new Date().toISOString(),
-          },
-          ...prev.filter((s) => s.id !== data.id),
-        ]);
-      } else if (data.status === "FAILED") {
-        setActiveScan(data);
-        setError(data.errorMessage || "Scan failed");
-        setScanning(false);
-        scanningRef.current = false;
-        if (pollRef.current) clearInterval(pollRef.current);
-      } else if (data.status === "AWAITING_CLARIFICATION") {
-        setResult(data);
-        setActiveScan(data);
-        setScanning(false);
-        scanningRef.current = false;
-        if (pollRef.current) clearInterval(pollRef.current);
-      }
-    } catch {
-      // Keep polling on network errors
-    }
-  }
-
-  // Auto-detect if a scan was resumed while user was in AI assistant
-  // When the page loads and we have a result in AWAITING_CLARIFICATION,
-  // re-poll to check if clarification was already submitted
-  useEffect(() => {
-    if (!result || !result.id) return;
-    if (result.status !== "AWAITING_CLARIFICATION") return;
-
-    // Check once immediately if the scan has been resumed
-    const checkResume = async () => {
-      try {
-        const res = await fetch(`/api/scan/status/${result.id}`);
-        if (!res.ok) return;
-        const data: ScanResult = await res.json();
-
-        if (data.status === "COMPLETED") {
-          setResult(data);
-          // Add to recent scans list
-          setRecentScans((prev) => [
-            {
-              id: data.id,
-              frameworkType: data.frameworkType,
-              score: data.score ?? 0,
-              riskLevel: data.riskLevel ?? "UNKNOWN",
-              completedAt: new Date().toISOString(),
-            },
-            ...prev.filter((s) => s.id !== data.id),
-          ]);
-          // Mark as completed in the multi-framework tracking
-          setCompletedScanIds((prev) => new Set([...prev, result.id]));
-        } else if (data.status === "FAILED") {
-          setError(data.errorMessage || "Scan failed");
-          setResult(data);
-          setCompletedScanIds((prev) => new Set([...prev, result.id]));
-        } else if (data.status === "QUEUED" || data.status === "RUNNING") {
-          // Scan was resumed! Start polling for completion with events
-          setScanning(true);
-          setEvents((e) => [...e, "Scan resumed after clarification..."]);
-          eventCountRef.current = 0;
-          // Resume polling all remaining scans
-          if (allScanIds.length > 0) {
-            pollRef.current = setInterval(() => pollAllScans(allScanIds), 2000);
-          } else {
-            pollRef.current = setInterval(() => pollProgress(result.id), 2000);
-          }
-        }
-        // If still AWAITING_CLARIFICATION, user hasn't answered yet — keep showing the prompt
-      } catch {
-        // ignore
-      }
-    };
-
-    checkResume();
-  }, [result?.id, result?.status, allScanIds, pollAllScans]);
-
-  useEffect(() => {
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, []);
 
   async function submitClarification() {
     if (!activeScan || !clarificationAnswer.trim()) return;
@@ -466,23 +239,15 @@ export default function ScanRunner() {
         return;
       }
 
-      // Clarification submitted successfully
+      // Clarification submitted successfully — polling resumes via ScanContext
       setClarificationAnswer("");
       setSubmittingClarification(false);
-      // Resume polling will happen automatically via context
       setScanning(true);
       scanningRef.current = true;
-      eventCountRef.current = 0;
-      setCompletedScanIds(new Set());
-
-      // Start polling for progress
-      if (allScanIds.length > 0) {
-        pollRef.current = setInterval(() => pollAllScans(allScanIds), 2000);
-      } else if (activeScan.id) {
-        pollRef.current = setInterval(() => pollProgress(activeScan.id), 2000);
-      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to submit clarification");
+      const errorMsg = e instanceof Error ? e.message : "Failed to submit clarification";
+      console.error("[Clarification Submit Error]", e);
+      setError(errorMsg);
       setSubmittingClarification(false);
     }
   }
@@ -766,22 +531,22 @@ export default function ScanRunner() {
         )}
 
         {/* Live narration during scan — inline thinking */}
-        {events.length > 0 && !result && (
+        {contextEvents.length > 0 && !result && (
           <div className="mb-8 bg-card border border-border rounded-xl p-5">
             <div className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
               {scanning && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />}
               {scanning ? "Scanning..." : "Scan progress"}
             </div>
             <div className="space-y-1.5">
-              {events.slice(-6).map((e, idx) => {
-                const isOld = idx < Math.max(0, events.slice(-6).length - 2);
+              {contextEvents.slice(-6).map((e, idx) => {
+                const isOld = idx < Math.max(0, contextEvents.slice(-6).length - 2);
                 const isThinking = e.startsWith("Checking:");
                 const isWorking = e.startsWith("Working with:");
                 const isBuilding = e.startsWith("Building") || e.startsWith("Cross-referencing");
 
                 return (
                   <div
-                    key={events.length - 6 + idx}
+                    key={contextEvents.length - 6 + idx}
                     className={`text-xs flex items-start gap-2 transition-opacity ${
                       isOld ? "opacity-40" : "opacity-100"
                     } ${
@@ -794,7 +559,7 @@ export default function ScanRunner() {
                   >
                     {isThinking && (
                       <span className="text-blue-600/60 text-xs mt-0.5 flex-shrink-0">
-                        {idx === events.slice(-6).length - 1 && scanning ? "..." : "\u2713"}
+                        {idx === contextEvents.slice(-6).length - 1 && scanning ? "..." : "\u2713"}
                       </span>
                     )}
                     <span className="font-mono">{e}</span>

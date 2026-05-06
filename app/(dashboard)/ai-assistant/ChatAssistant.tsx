@@ -42,7 +42,7 @@ type ScanPollStatus = "idle" | "polling" | "completed" | "failed";
 export default function ChatAssistant() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { activeScan, needsClarification, clearActiveScan, setActiveScan } = useScanContext();
+  const { activeScan, events: contextEvents, needsClarification, clearActiveScan, setActiveScan } = useScanContext();
 
   const scanId = searchParams.get("scanId") || activeScan?.id;
   const pendingQuestion = searchParams.get("question") || activeScan?.pendingQuestion;
@@ -68,7 +68,6 @@ export default function ChatAssistant() {
   const eventsEndRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
   const askedQuestionRef = useRef<string | null>(null);
-  const eventsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastMessageTimeRef = useRef<number>(Date.now());
   const clarificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -85,35 +84,14 @@ export default function ChatAssistant() {
     setTimeout(() => eventsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
   }, []);
 
-  // Poll for events when scan is active and running
+  // Sync events from context when available
   useEffect(() => {
-    if (!activeScan || !["QUEUED", "RUNNING"].includes(activeScan.status)) {
-      if (eventsPollRef.current) clearInterval(eventsPollRef.current);
-      return;
+    if (contextEvents.length > 0) {
+      setEvents(contextEvents);
+      setLastEventTime(Date.now());
+      scrollEventsToBottom();
     }
-
-    const pollEvents = async () => {
-      try {
-        const res = await fetch(`/api/scan/${activeScan.id}/events?limit=8`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.events && data.events.length > 0) {
-          setEvents(data.events);
-          setLastEventTime(Date.now());
-          scrollEventsToBottom();
-        }
-      } catch {
-        // Keep polling on network errors
-      }
-    };
-
-    pollEvents();
-    eventsPollRef.current = setInterval(pollEvents, 3000);
-
-    return () => {
-      if (eventsPollRef.current) clearInterval(eventsPollRef.current);
-    };
-  }, [activeScan?.id, activeScan?.status, scrollEventsToBottom]);
+  }, [contextEvents, scrollEventsToBottom]);
 
   // Handle conversation mode idle timeout
   useEffect(() => {
@@ -337,31 +315,22 @@ export default function ChatAssistant() {
 
   // Detect if a message is likely a real answer or just conversation
   function isLikelyAnswer(message: string): boolean {
-    const conversationalPhrases = [
-      "come again", "what", "huh", "repeat", "can you", "pardon",
-      "sorry", "ok", "okay", "thanks", "thank you", "hi", "hello",
-      "hmm", "yes please", "no problem", "sure", "got it", "gotcha",
-      "i see", "yeah", "yep", "nope", "maybe", "idk", "i don't know"
-    ];
+    const trimmed = message.trim().toLowerCase();
 
-    const lower = message.toLowerCase().trim();
-
-    // Very short messages that are purely conversational
-    if (conversationalPhrases.some(phrase => lower.includes(phrase) && message.length < 50)) {
-      return false;
+    // Always accept clear yes/no answers
+    if (["no", "yes", "n/a", "none", "never", "not applicable"].includes(trimmed)) {
+      return true;
     }
 
-    // Very short responses without substance are not answers
-    if (message.trim().length < 3) {
-      return false;
+    // Accept if 3+ words
+    if (trimmed.split(/\s+/).length >= 3) {
+      return true;
     }
 
-    // If it's a question or looks confused, not an answer
-    if (message.includes("?") && message.length < 50) {
-      return false;
-    }
-
-    return true;
+    // Reject only pure conversational fillers
+    const fillers = ["what", "huh", "ok", "okay", "sure", "hmm",
+                     "come again", "what?", "sorry", "repeat"];
+    return !fillers.includes(trimmed);
   }
 
   // Detect scan intent from user message
