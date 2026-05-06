@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SignOutButton } from "./SignOutButton";
+import { ScanProvider } from "./contexts/ScanContext";
+import { FloatingScanWidget } from "./components/FloatingScanWidget";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -71,9 +73,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
   return (
-    <div className="flex h-screen bg-background text-foreground overflow-hidden">
-      {/* Animated Sidebar */}
-      <motion.aside
+    <ScanProvider>
+      <div className="flex h-screen bg-background text-foreground overflow-hidden">
+        {/* Animated Sidebar */}
+        <motion.aside
         className="bg-card border-r border-border flex flex-col relative z-20"
         animate={{ width: sidebarExpanded ? "256px" : "80px" }}
         transition={{ duration: 0.3, ease: "easeInOut" }}
@@ -270,6 +273,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {children}
         </div>
       </main>
-    </div>
+
+      {/* Floating scan widget */}
+      <FloatingScanWidget />
+      </div>
+    </ScanProvider>
   );
 }

@@ -5,9 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Shield, AlertTriangle, CheckCircle2, XCircle,
   FileQuestion, Loader2, ChevronDown, ArrowRight,
-  Plug, Check, Download, PlayCircle,
+  Plug, Check, Download, PlayCircle, X,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useScanContext } from "../contexts/ScanContext";
 
 type Framework = {
   id: string;
@@ -67,10 +68,11 @@ export default function ScanRunner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId");
+  const { activeScan, needsClarification, clarificationQuestion, clarificationControlCode, setActiveScan } = useScanContext();
+
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [scanning, setScanning] = useState(false);
-  const [scanId, setScanId] = useState<string | null>(null);
   const [allScanIds, setAllScanIds] = useState<string[]>([]);
   const [completedScanIds, setCompletedScanIds] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -88,8 +90,36 @@ export default function ScanRunner() {
     completedAt: string | null;
   }>>([]);
   const [loadingRecent, setLoadingRecent] = useState(true);
+  const [clarificationAnswer, setClarificationAnswer] = useState("");
+  const [submittingClarification, setSubmittingClarification] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scanningRef = useRef(false);
+
+  // Restore scan on mount if activeScan exists in context
+  useEffect(() => {
+    if (activeScan) {
+      setResult(activeScan);
+
+      // If scan is still running, resume polling
+      if (["QUEUED", "RUNNING"].includes(activeScan.status)) {
+        setScanning(true);
+        scanningRef.current = true;
+        eventCountRef.current = 0;
+
+        // Resume polling
+        if (allScanIds.length > 0) {
+          pollRef.current = setInterval(() => pollAllScans(allScanIds), 2000);
+        } else if (activeScan.id) {
+          pollRef.current = setInterval(() => pollProgress(activeScan.id), 2000);
+        }
+      }
+
+      // If awaiting clarification, show modal immediately
+      if (activeScan.status === "AWAITING_CLARIFICATION") {
+        setScanning(false);
+      }
+    }
+  }, [activeScan?.id]); // Only on mount, not on every activeScan change
 
   // Check if user was redirected after selecting a GitHub repo or syncing an integration
   useEffect(() => {
@@ -196,6 +226,7 @@ export default function ScanRunner() {
         // Check terminal states for this scan
         if (data.status === "COMPLETED") {
           newCompleted.add(id);
+          setActiveScan(data);
           // Add to recent scans list
           setRecentScans((prev) => [
             {
@@ -209,9 +240,11 @@ export default function ScanRunner() {
           ]);
         } else if (data.status === "FAILED") {
           newCompleted.add(id);
+          setActiveScan(data);
           setError(data.errorMessage || `Scan ${data.frameworkType} failed`);
         } else if (data.status === "AWAITING_CLARIFICATION") {
           newCompleted.add(id);
+          setActiveScan(data);
           hasAwaiting = true;
           awaitingScanId = id;
           awaitingQuestion = data.pendingQuestion;
@@ -219,6 +252,7 @@ export default function ScanRunner() {
           setResult(data);
         } else {
           allDone = false;
+          setActiveScan(data);
         }
       } catch {
         // Keep polling on network errors
@@ -283,12 +317,27 @@ export default function ScanRunner() {
       const data = await res.json();
       const newScanId = data.scanId;
       const scanIds = data.scanIds ?? [newScanId];
-      setScanId(newScanId);
       setAllScanIds(scanIds);
 
       if (data.message) {
         setEvents([data.message]);
       }
+
+      // Save initial scan state to context
+      const initialScan: ScanResult = {
+        id: newScanId,
+        status: "QUEUED",
+        score: null,
+        riskLevel: null,
+        frameworkType: "",
+        pendingQuestion: null,
+        pendingControlCode: null,
+        errorMessage: null,
+        controlResults: [],
+        report: null,
+        shadowPass: null,
+      };
+      setActiveScan(initialScan);
 
       // Start polling for progress + results across all scan IDs
       pollRef.current = setInterval(() => pollAllScans(scanIds), 2000);
@@ -315,6 +364,7 @@ export default function ScanRunner() {
       // Check terminal states
       if (data.status === "COMPLETED") {
         setResult(data);
+        setActiveScan(data);
         setScanning(false);
         scanningRef.current = false;
         if (pollRef.current) clearInterval(pollRef.current);
@@ -330,12 +380,14 @@ export default function ScanRunner() {
           ...prev.filter((s) => s.id !== data.id),
         ]);
       } else if (data.status === "FAILED") {
+        setActiveScan(data);
         setError(data.errorMessage || "Scan failed");
         setScanning(false);
         scanningRef.current = false;
         if (pollRef.current) clearInterval(pollRef.current);
       } else if (data.status === "AWAITING_CLARIFICATION") {
         setResult(data);
+        setActiveScan(data);
         setScanning(false);
         scanningRef.current = false;
         if (pollRef.current) clearInterval(pollRef.current);
@@ -402,6 +454,45 @@ export default function ScanRunner() {
   useEffect(() => {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
+
+  async function submitClarification() {
+    if (!activeScan || !clarificationAnswer.trim()) return;
+
+    setSubmittingClarification(true);
+    try {
+      const res = await fetch(`/api/scan/${activeScan.id}/clarify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer: clarificationAnswer }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed to submit clarification" }));
+        setError(data.error || "Failed to submit clarification");
+        setSubmittingClarification(false);
+        return;
+      }
+
+      // Clarification submitted successfully
+      setClarificationAnswer("");
+      setSubmittingClarification(false);
+      // Resume polling will happen automatically via context
+      setScanning(true);
+      scanningRef.current = true;
+      eventCountRef.current = 0;
+      setCompletedScanIds(new Set());
+
+      // Start polling for progress
+      if (allScanIds.length > 0) {
+        pollRef.current = setInterval(() => pollAllScans(allScanIds), 2000);
+      } else if (activeScan.id) {
+        pollRef.current = setInterval(() => pollProgress(activeScan.id), 2000);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to submit clarification");
+      setSubmittingClarification(false);
+    }
+  }
 
   function toggleFramework(id: string) {
     setSelectedIds((prev) => {
@@ -688,15 +779,19 @@ export default function ScanRunner() {
               {scanning && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />}
               {scanning ? "Scanning..." : "Scan progress"}
             </div>
-            <div className="space-y-2 max-h-72 overflow-y-auto">
-              {events.map((e, i) => {
+            <div className="space-y-1.5">
+              {events.slice(-6).map((e, idx) => {
+                const isOld = idx < Math.max(0, events.slice(-6).length - 2);
                 const isThinking = e.startsWith("Checking:");
                 const isWorking = e.startsWith("Working with:");
                 const isBuilding = e.startsWith("Building") || e.startsWith("Cross-referencing");
+
                 return (
                   <div
-                    key={i}
-                    className={`text-sm flex items-start gap-2 ${
+                    key={events.length - 6 + idx}
+                    className={`text-xs flex items-start gap-2 transition-opacity ${
+                      isOld ? "opacity-40" : "opacity-100"
+                    } ${
                       isThinking
                         ? "text-blue-400/80 pl-2 border-l-2 border-blue-600/30"
                         : isWorking || isBuilding
@@ -706,10 +801,10 @@ export default function ScanRunner() {
                   >
                     {isThinking && (
                       <span className="text-blue-600/60 text-xs mt-0.5 flex-shrink-0">
-                        {i === events.length - 1 && scanning ? "..." : "\u2713"}
+                        {idx === events.slice(-6).length - 1 && scanning ? "..." : "\u2713"}
                       </span>
                     )}
-                    <span>{e}</span>
+                    <span className="font-mono">{e}</span>
                   </div>
                 );
               })}
@@ -882,20 +977,65 @@ export default function ScanRunner() {
           </div>
         )}
 
-        {/* Clarification needed — redirect to chat */}
-        {result && result.status === "AWAITING_CLARIFICATION" && (
-          <div className="bg-yellow-950/20 border border-yellow-800/50 rounded-xl p-5">
-            <h3 className="text-sm font-semibold text-yellow-400 mb-2">Clarification needed</h3>
-            <p className="text-sm text-foreground/80 mb-1">
-              Control: <span className="font-medium">{result.pendingControlCode}</span>
-            </p>
-            <p className="text-sm text-foreground/80 mb-4">{result.pendingQuestion}</p>
-            <a
-              href={`/ai-assistant?scanId=${result.id}&question=${encodeURIComponent(result.pendingQuestion ?? "")}`}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-yellow-600 text-white rounded-lg text-sm font-medium hover:bg-yellow-500 transition-colors"
-            >
-              Answer in AI Assistant →
-            </a>
+        {/* Clarification modal — inline */}
+        {(needsClarification || (result && result.status === "AWAITING_CLARIFICATION")) && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-card border border-border rounded-xl shadow-lg max-w-md w-full mx-4 p-6">
+              <div className="flex items-start justify-between mb-4">
+                <h3 className="text-lg font-semibold text-yellow-400">Clarification needed</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClarificationAnswer("");
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="Close clarification modal"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="mb-4">
+                <p className="text-sm text-foreground/80 mb-2">
+                  Control: <span className="font-medium">{clarificationControlCode || result?.pendingControlCode}</span>
+                </p>
+                <p className="text-sm text-foreground/80">
+                  {clarificationQuestion || result?.pendingQuestion}
+                </p>
+              </div>
+
+              <div className="mb-4">
+                <textarea
+                  value={clarificationAnswer}
+                  onChange={(e) => setClarificationAnswer(e.target.value)}
+                  placeholder="Type your answer here..."
+                  disabled={submittingClarification}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-50"
+                  rows={4}
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={submitClarification}
+                  disabled={submittingClarification || !clarificationAnswer.trim()}
+                  className="flex-1 px-4 py-2.5 bg-yellow-600 text-white rounded-lg text-sm font-medium hover:bg-yellow-500 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                >
+                  {submittingClarification ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      Submit Answer
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

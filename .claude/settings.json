@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '=== SKILL EXECUTION COMPLETE ===' && jq -r 'if .tool_response then .tool_response | tostring else \"No response\" end' 2>/dev/null || true",
+            "statusMessage": "Displaying skill results",
+            "async": false
+          }
+        ]
+      }
+    ]
+  },
+  "verbose": true,
+  "spinnerTipsEnabled": true
+}
