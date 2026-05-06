@@ -202,9 +202,9 @@ export default function ChatAssistant() {
 
       if (activeScan.controlResults && Array.isArray(activeScan.controlResults)) {
         activeScan.controlResults.forEach((control: any) => {
-          if (control.result === "PASS") controlCounts.passed++;
-          else if (control.result === "FAIL") controlCounts.failed++;
-          else if (control.result === "NO_EVIDENCE") controlCounts.noEvidence++;
+          if (control.status === "PASS") controlCounts.passed++;
+          else if (control.status === "FAIL") controlCounts.failed++;
+          else if (control.status === "NO_EVIDENCE") controlCounts.noEvidence++;
         });
       }
 

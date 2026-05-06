@@ -155,21 +155,41 @@ Rules:
 Return ONLY the JSON object, no markdown fencing.`;
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-    let res: Awaited<ReturnType<typeof client.messages.create>>;
-    try {
-      res = await client.messages.create(
-        {
-          model: AI_MODELS.FAST,
-          max_tokens: 1000,
-          system: systemPrompt,
-          messages: [{ role: "user", content: prompt }],
-        },
-        { signal: controller.signal }
-      );
-    } finally {
-      clearTimeout(timeoutId);
+    let retries = 0;
+    const maxRetries = 1;
+    let res: Awaited<ReturnType<typeof client.messages.create>> | null = null;
+    let lastError: Error | null = null;
+
+    while (retries <= maxRetries && !res) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        try {
+          res = await client.messages.create(
+            {
+              model: AI_MODELS.FAST,
+              max_tokens: 1000,
+              system: systemPrompt,
+              messages: [{ role: "user", content: prompt }],
+            },
+            { signal: controller.signal }
+          );
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (lastError.message.includes("AbortError") && retries < maxRetries) {
+          retries++;
+          console.warn(`[llm-evaluator] Timeout on attempt ${retries}, retrying...`);
+        } else {
+          throw lastError;
+        }
+      }
+    }
+
+    if (!res) {
+      throw new Error("LLM request failed after retries");
     }
 
     const text = res.content

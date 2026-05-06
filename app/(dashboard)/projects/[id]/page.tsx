@@ -63,6 +63,13 @@ export default function ProjectDetailPage() {
     loadProject();
   }, [projectId]);
 
+  // Store lastProjectId in sessionStorage for scan context
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("lastProjectId", projectId);
+    }
+  }, [projectId]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -178,11 +185,26 @@ export default function ProjectDetailPage() {
         <div className="bg-card border border-border rounded-xl p-6">
           <h2 className="text-xl font-bold text-foreground mb-4">Recent Scans</h2>
           {filteredScans.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">
-              {selectedFramework
-                ? `No scans for ${selectedFramework.replace(/_/g, " ")}`
-                : "No completed scans yet"}
-            </p>
+            <div className="text-center py-12">
+              {selectedFramework ? (
+                <p className="text-muted-foreground">
+                  No scans for {selectedFramework.replace(/_/g, " ")}
+                </p>
+              ) : (
+                <>
+                  <p className="text-foreground font-semibold mb-4">
+                    Run your first compliance scan
+                  </p>
+                  <a
+                    href={`/scan?projectId=${projectId}`}
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors font-medium"
+                  >
+                    Start scan
+                    <span className="text-lg">→</span>
+                  </a>
+                </>
+              )}
+            </div>
           ) : (
             <div className="space-y-3">
               {filteredScans.map((scan) => (

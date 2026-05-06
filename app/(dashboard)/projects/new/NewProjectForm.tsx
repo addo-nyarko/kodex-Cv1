@@ -456,7 +456,7 @@ export default function NewProjectForm() {
               </button>
             ) : (
               <button
-                onClick={() => router.push(`/scan`)}
+                onClick={() => router.push(`/scan?projectId=${projectId}`)}
                 className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 transition-colors"
               >
                 <ScanSearch className="w-4 h-4" />

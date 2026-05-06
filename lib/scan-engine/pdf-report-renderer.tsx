@@ -259,7 +259,7 @@ export function AuditReportDocument({
         {report.executiveSummary && (
           <>
             <Text style={styles.sectionTitle}>Executive Summary</Text>
-            <Text style={styles.summaryText}>{report.executiveSummary}</Text>
+            <Text style={styles.summaryText}>{report.executiveSummary.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1')}</Text>
           </>
         )}
 

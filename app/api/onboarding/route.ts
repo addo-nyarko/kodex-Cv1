@@ -52,6 +52,20 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Create a default project for the org if none exists
+    const existingProject = await db.project.findFirst({
+      where: { orgId },
+    });
+    if (!existingProject) {
+      await db.project.create({
+        data: {
+          name: `${org.name} — Main`,
+          orgId,
+          description: 'Default compliance project',
+        },
+      });
+    }
+
     return Response.json({ orgId: org.id, slug: org.slug });
   } catch (error) {
     console.error("Onboarding error:", error);

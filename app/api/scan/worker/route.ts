@@ -206,6 +206,15 @@ async function processEvidencePhase(state: ScanChunkState): Promise<void> {
   // Store evidence in Redis for subsequent chunks
   const evidenceKey = await saveEvidence(scanId, evidence);
 
+  // Evidence audit — verify what was actually collected
+  console.log('[evidence-audit]', JSON.stringify({
+    hasGithub: !!evidence.codeSignals.github,
+    githubSignals: evidence.codeSignals.github ? Object.keys(evidence.codeSignals.github) : [],
+    docCount: evidence.documents?.length || 0,
+    questionnaireAnswers: Object.keys(evidence.questionnaire || {}).length,
+    clarifications: Object.keys(evidence.clarifications || {}).length,
+  }, null, 2));
+
   // Determine framework controls count
   const plugin = frameworkRegistry.get(state.frameworkType);
   if (!plugin) throw new Error(`Unknown framework: ${state.frameworkType}`);

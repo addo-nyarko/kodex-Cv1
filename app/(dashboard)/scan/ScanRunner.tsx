@@ -67,7 +67,8 @@ const STATUS_CONFIG = {
 export default function ScanRunner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const projectId = searchParams.get("projectId");
+  const urlProjectId = searchParams.get("projectId");
+  const [projectId, setProjectId] = useState<string | null>(urlProjectId);
   const { activeScan, events: contextEvents, needsClarification, clarificationQuestion, clarificationControlCode, setActiveScan } = useScanContext();
 
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
@@ -90,6 +91,36 @@ export default function ScanRunner() {
   const [clarificationAnswer, setClarificationAnswer] = useState("");
   const [submittingClarification, setSubmittingClarification] = useState(false);
   const scanningRef = useRef(false);
+
+  // Try to restore projectId from sessionStorage if URL param missing
+  useEffect(() => {
+    if (!urlProjectId && typeof window !== "undefined") {
+      const stored = sessionStorage.getItem("lastProjectId");
+      if (stored) {
+        setProjectId(stored);
+        return;
+      }
+    }
+
+    // If still no projectId, check if user has projects
+    if (!urlProjectId && !projectId) {
+      fetch('/api/projects')
+        .then(res => res.json())
+        .then(data => {
+          if (data.projects?.length > 0) {
+            // Has projects — make them pick one
+            router.replace('/projects?message=select-project');
+          } else {
+            // No projects yet — send to create first project
+            router.replace('/projects/new');
+          }
+        })
+        .catch(() => {
+          // Fallback on error: redirect to projects
+          router.replace('/projects?message=select-project');
+        });
+    }
+  }, [urlProjectId, projectId, router]);
 
   // Restore scan on mount if activeScan exists in context
   useEffect(() => {
@@ -531,7 +562,7 @@ export default function ScanRunner() {
         )}
 
         {/* Live narration during scan — inline thinking */}
-        {contextEvents.length > 0 && !result && (
+        {contextEvents.length > 0 && scanning && (
           <div className="mb-8 bg-card border border-border rounded-xl p-5">
             <div className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
               {scanning && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />}

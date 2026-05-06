@@ -25,7 +25,6 @@ import { motion, AnimatePresence } from "motion/react";
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/scan", label: "Scan", icon: ScanSearch },
   { href: "/documents", label: "Documents", icon: FileText },
   { href: "/risk", label: "Risk", icon: AlertTriangle },
   { href: "/frameworks", label: "Frameworks", icon: Shield },

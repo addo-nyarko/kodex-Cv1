@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
 import {
   Plus,
@@ -11,6 +12,7 @@ import {
   ArrowUpRight,
   Loader2,
   FolderOpen,
+  X,
 } from "lucide-react";
 
 type ProjectCard = {
@@ -37,9 +39,12 @@ type ProjectsResponse = {
 };
 
 export default function ProjectList() {
+  const searchParams = useSearchParams();
+  const message = searchParams.get("message");
   const [data, setData] = useState<ProjectsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   useEffect(() => {
     async function fetchProjects() {
@@ -90,6 +95,25 @@ export default function ProjectList() {
           )}
         </div>
       </div>
+
+      {message === "select-project" && !bannerDismissed && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200 dark:border-blue-900 px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                Select a project to start a compliance scan
+              </p>
+            </div>
+            <button
+              onClick={() => setBannerDismissed(true)}
+              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+              aria-label="Dismiss banner"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="p-8">
         {/* Loading state */}
