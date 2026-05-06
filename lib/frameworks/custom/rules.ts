@@ -66,22 +66,25 @@ export const customRules: ControlRule[] = [
       const hasIRDoc = hasDoc(ev, "incident response", "security incident", "breach response", "incident handling");
       const hasSecurityMd = hasGitSignal(ev, "hasSecurityMd");
       const notionHasIR = hasNotionSignal(ev, "hasIncidentResponse");
+      const hasAuth = hasGitSignal(ev, "hasAuth");
 
       const sources: string[] = [];
       if (hasIRDoc) sources.push("incident_response_plan");
       if (hasSecurityMd) sources.push("GitHub: SECURITY.md");
       if (notionHasIR) sources.push("Notion: incident response plan");
+      if (hasAuth) sources.push("GitHub: authentication (access control)");
 
-      const hasEvidence = hasIRDoc || hasSecurityMd || notionHasIR;
+      const hasPolicy = hasIRDoc || notionHasIR;
+      const hasCodeSignal = hasSecurityMd || hasAuth;
 
       return {
-        status: hasIRDoc || notionHasIR ? "PASS" : hasEvidence ? "PARTIAL" : "NO_EVIDENCE",
-        confidence: hasIRDoc ? 0.85 : notionHasIR ? 0.75 : hasEvidence ? 0.5 : 0.2,
+        status: hasPolicy && hasCodeSignal ? "PASS" : hasPolicy || hasCodeSignal ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: hasPolicy && hasCodeSignal ? 0.85 : (hasPolicy || hasCodeSignal) ? 0.55 : 0.2,
         evidenceUsed: sources,
-        gaps: hasEvidence ? [] : ["No incident response procedure found"],
-        remediations: ["Create a documented incident response procedure covering detection, containment, and recovery"],
+        gaps: hasPolicy || hasCodeSignal ? (hasPolicy ? [] : ["Policy documented but no code-level enforcement found"]) : ["No incident response procedure found"],
+        remediations: ["Create a documented incident response procedure AND implement code-level enforcement (e.g., SECURITY.md, access controls, audit logging)"],
         lawyerQuestions: [],
-        note: hasEvidence ? "Incident response evidence found." : "An incident response procedure is a fundamental security requirement.",
+        note: hasPolicy && hasCodeSignal ? "IR policy with code-level enforcement verified." : hasPolicy || hasCodeSignal ? "Partial IR evidence found." : "An incident response procedure is a fundamental security requirement.",
       };
     },
   },
@@ -172,13 +175,17 @@ export const customRules: ControlRule[] = [
       if (hasTests) sources.push("GitHub: automated tests");
 
       return {
-        status: hasChangeDoc || techCount >= 2 ? "PASS" : techCount >= 1 ? "PARTIAL" : "NO_EVIDENCE",
-        confidence: hasChangeDoc && techCount >= 2 ? 0.9 : techCount >= 2 ? 0.65 : 0.3,
+        status: hasChangeDoc && techCount >= 2 ? "PASS" : (hasChangeDoc && techCount >= 1) || (techCount >= 2) ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: hasChangeDoc && techCount >= 2 ? 0.9 : (hasChangeDoc || techCount >= 2) ? 0.65 : techCount >= 1 ? 0.4 : 0.2,
         evidenceUsed: sources,
-        gaps: (hasChangeDoc || techCount >= 2) ? [] : ["No change management controls found"],
-        remediations: ["Implement code review, branch protection, CI/CD, and document your release process"],
+        gaps: hasChangeDoc && techCount >= 2 ? [] : [
+          ...(!hasChangeDoc && techCount > 0 ? ["Technical controls present but change management procedure not documented"] : []),
+          ...(hasChangeDoc && techCount < 2 ? [` Documentation exists but only ${techCount}/2 minimum technical controls (branch protection + CI/CD) detected`] : []),
+          ...(!hasChangeDoc && techCount === 0 ? ["No change management controls found"] : [])
+        ],
+        remediations: ["Establish formal change management: document release procedures AND implement code review, branch protection, CI/CD pipeline, and automated tests"],
         lawyerQuestions: [],
-        note: `Change management: ${techCount} technical controls detected.`,
+        note: hasChangeDoc && techCount >= 2 ? `Change management: documented procedure + ${techCount} technical controls verified.` : `Partial evidence: documentation=${!!hasChangeDoc}, technical controls=${techCount}/2.`,
       };
     },
   },

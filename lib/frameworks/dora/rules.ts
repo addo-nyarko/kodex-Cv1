@@ -35,19 +35,30 @@ export const doraRules: ControlRule[] = [
     check: (ev) => {
       const hasRiskFramework = hasDoc(ev, "ict risk", "information and communication technology risk", "operational risk", "risk management framework", "risk register");
       const notionHasSecPolicy = hasNotionSignal(ev, "hasSecurityPolicy");
+      const hasAuth = hasGitSignal(ev, "hasAuth");
+      const hasEncryption = hasGitSignal(ev, "hasEncryption");
+      const hasCI = hasGitSignal(ev, "hasCI");
 
       const sources: string[] = [];
       if (hasRiskFramework) sources.push("ict_risk_management_framework");
       if (notionHasSecPolicy) sources.push("Notion: security/risk policy");
+      if (hasAuth) sources.push("GitHub: authentication");
+      if (hasEncryption) sources.push("GitHub: encryption");
+      if (hasCI) sources.push("GitHub: CI/CD");
+
+      const techCount = [hasAuth, hasEncryption, hasCI].filter(Boolean).length;
 
       return {
-        status: hasRiskFramework ? "PASS" : notionHasSecPolicy ? "PARTIAL" : "NO_EVIDENCE",
-        confidence: hasRiskFramework ? 0.9 : notionHasSecPolicy ? 0.55 : 0.2,
+        status: hasRiskFramework && techCount >= 3 ? "PASS" : hasRiskFramework && techCount >= 1 ? "PARTIAL" : techCount >= 3 ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: hasRiskFramework && techCount >= 3 ? 0.9 : (hasRiskFramework || techCount >= 2) ? 0.55 : 0.2,
         evidenceUsed: sources,
-        gaps: hasRiskFramework ? [] : ["No ICT risk management framework documented"],
-        remediations: ["Establish a comprehensive ICT risk management framework covering identification, classification, assessment, and treatment of ICT risks per DORA Art. 5"],
+        gaps: [
+          ...(!hasRiskFramework ? ["No ICT risk management framework documented"] : []),
+          ...(techCount < 3 && (hasRiskFramework || techCount > 0) ? [`Risk framework and technical controls incomplete: ${techCount}/3 controls (auth, encryption, CI/CD) detected`] : [])
+        ],
+        remediations: ["Establish a comprehensive ICT risk management framework with implementation controls: authentication, encryption, and CI/CD (automated testing) per DORA Art. 5"],
         lawyerQuestions: ["Are we in scope for DORA as a financial entity or ICT third-party service provider, and what proportionality principle applies to our risk framework?"],
-        note: hasRiskFramework ? "ICT risk framework found." : "DORA Art. 5 requires financial entities to maintain a comprehensive ICT risk management framework.",
+        note: hasRiskFramework && techCount >= 3 ? "DORA Art. 5: risk framework + full technical stack verified." : hasRiskFramework || techCount > 0 ? `Partial evidence: framework=${!!hasRiskFramework}, controls=${techCount}/3` : "DORA Art. 5 requires financial entities to maintain a comprehensive ICT risk management framework with technical enforcement.",
       };
     },
   },
@@ -92,6 +103,7 @@ export const doraRules: ControlRule[] = [
     check: (ev) => {
       const hasDetectionDoc = hasDoc(ev, "anomaly detection", "monitoring", "siem", "intrusion detection", "security monitoring", "alerting");
       const hasLogging = hasGitSignal(ev, "hasLogging");
+      const hasMonitoringKeywords = hasDoc(ev, "logging", "monitoring", "alerting", "observability", "siem", "anomaly");
       const hasSecurityChannel = hasSlackSignal(ev, "hasSecurityChannel");
       const hasLoginMonitoring = ev.codeSignals?.googleWorkspace ? !!(ev.codeSignals.googleWorkspace as Record<string, unknown>)["hasLoginMonitoring"] : false;
 
@@ -104,13 +116,13 @@ export const doraRules: ControlRule[] = [
       const hasEvidence = hasDetectionDoc || hasLogging || hasSecurityChannel || hasLoginMonitoring;
 
       return {
-        status: hasDetectionDoc && hasLogging ? "PASS" : hasEvidence ? "PARTIAL" : "NO_EVIDENCE",
+        status: hasDetectionDoc && (hasLogging || hasMonitoringKeywords) ? "PASS" : hasEvidence ? "PARTIAL" : "NO_EVIDENCE",
         confidence: hasDetectionDoc && hasLogging ? 0.85 : hasEvidence ? 0.55 : 0.2,
         evidenceUsed: sources,
         gaps: (hasDetectionDoc && hasLogging) ? [] : ["Detection and monitoring capabilities not fully documented or implemented"],
         remediations: ["Implement centralised logging, anomaly detection, and real-time alerting; document detection procedures and thresholds for ICT-related incidents"],
         lawyerQuestions: ["What detection capabilities and response times are required under DORA Art. 10 for our entity classification?"],
-        note: hasEvidence ? `Detection evidence from ${sources.length} source(s).` : "DORA Art. 10 requires mechanisms to promptly detect anomalous activities.",
+        note: hasDetectionDoc && hasLogging ? `DORA Art. 10: monitoring/logging + policy verified.` : hasEvidence ? `Detection evidence from ${sources.length} source(s) but incomplete.` : "DORA Art. 10 requires mechanisms to promptly detect anomalous activities.",
       };
     },
   },
@@ -239,20 +251,25 @@ export const doraRules: ControlRule[] = [
     articleRefs: { DORA: "Art. 28" },
     check: (ev) => {
       const hasTPRMDoc = hasDoc(ev, "third party risk", "vendor management", "ict service provider", "outsourcing", "critical ict", "subcontracting");
+      const hasVendorAssessment = hasDoc(ev, "vendor assessment", "supplier risk", "third-party audit", "soc2 vendor", "security audit vendor", "vendor due diligence");
       const notionHasVendor = hasNotionSignal(ev, "hasVendorManagement");
 
       const sources: string[] = [];
       if (hasTPRMDoc) sources.push("ict_tprm_policy");
+      if (hasVendorAssessment) sources.push("vendor_assessment_evidence");
       if (notionHasVendor) sources.push("Notion: vendor management");
 
       return {
-        status: hasTPRMDoc || notionHasVendor ? "PASS" : "NO_EVIDENCE",
-        confidence: hasTPRMDoc ? 0.9 : notionHasVendor ? 0.7 : 0.2,
+        status: hasTPRMDoc && hasVendorAssessment ? "PASS" : hasTPRMDoc || notionHasVendor ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: hasTPRMDoc && hasVendorAssessment ? 0.9 : (hasTPRMDoc || notionHasVendor) ? 0.6 : 0.2,
         evidenceUsed: sources,
-        gaps: (hasTPRMDoc || notionHasVendor) ? [] : ["No ICT third-party risk management policy found"],
-        remediations: ["Create an ICT TPRM framework covering: vendor register, risk classification (critical vs non-critical), contractual requirements per DORA Annex, and exit strategies"],
+        gaps: [
+          ...(!hasTPRMDoc ? ["No ICT third-party risk management policy found"] : []),
+          ...(hasTPRMDoc && !hasVendorAssessment ? ["TPRM policy exists but vendor assessment evidence (SOC2, audits) not found"] : [])
+        ],
+        remediations: ["Create an ICT TPRM framework covering: vendor register, risk classification, vendor assessments/SOC2, contractual requirements per DORA Annex, and exit strategies"],
         lawyerQuestions: ["Which of our ICT service providers qualify as 'critical' under DORA Art. 31, triggering the oversight framework?"],
-        note: (hasTPRMDoc || notionHasVendor) ? "ICT third-party risk management found." : "DORA Art. 28 requires managing ICT third-party risk with appropriate due diligence.",
+        note: hasTPRMDoc && hasVendorAssessment ? "DORA Art. 28: TPRM policy with vendor assessments verified." : (hasTPRMDoc || notionHasVendor) ? "TPRM policy found but vendor assessment evidence incomplete." : "DORA Art. 28 requires managing ICT third-party risk with appropriate due diligence and vendor assessments.",
       };
     },
   },

@@ -19,6 +19,13 @@ interface Control {
   title: string;
 }
 
+interface EvidenceSource {
+  type: 'github' | 'document' | 'questionnaire' | 'clarification';
+  scannedAt: string;
+  reliability: 'high' | 'medium' | 'low';
+  label: string;
+}
+
 interface ControlResult {
   id: string;
   controlCode: string;
@@ -28,6 +35,7 @@ interface ControlResult {
   gaps: string[];
   remediations: string[];
   note: string;
+  evidenceSources: EvidenceSource[];
   control: Control;
 }
 
@@ -48,6 +56,8 @@ interface ScanData {
   controlResults: ControlResult[];
   documents: Document[];
   completedAt: string | null;
+  staleEvidence: boolean;
+  staleSources: string[];
 }
 
 const STATUS_ICONS = {
@@ -178,6 +188,31 @@ export default function ScanResultsPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-8 py-8">
+        {/* Stale Evidence Warning */}
+        {scan.staleEvidence && (
+          <div className="mb-8 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-amber-900 dark:text-amber-200">
+                ⚠️ Some evidence is over 30 days old
+              </p>
+              <p className="text-sm text-amber-800 dark:text-amber-300 mt-1">
+                Results may not reflect recent changes. Consider re-scanning with updated evidence.
+              </p>
+              {scan.staleSources && scan.staleSources.length > 0 && (
+                <div className="mt-2 text-sm">
+                  <p className="text-amber-800 dark:text-amber-300 font-medium mb-1">Stale sources:</p>
+                  <ul className="list-disc list-inside text-amber-800 dark:text-amber-300 space-y-0.5">
+                    {scan.staleSources.map((source, i) => (
+                      <li key={i}>{source}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Score Cards */}
         <div className="grid grid-cols-3 gap-4 mb-8">
           <div className="bg-card border border-border rounded-xl p-6">
@@ -251,6 +286,37 @@ export default function ScanResultsPage() {
                       <p className="text-xs text-muted-foreground">
                         Confidence: {Math.round(result.confidence)}%
                       </p>
+
+                      {/* Evidence Sources */}
+                      <div className="mt-2">
+                        {result.evidenceSources && result.evidenceSources.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {result.evidenceSources.map((source, i) => {
+                              const reliabilityColor =
+                                source.reliability === 'high' ? 'bg-green-500/10 text-green-700 dark:text-green-400' :
+                                source.reliability === 'medium' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400' :
+                                'bg-red-500/10 text-red-600 dark:text-red-400';
+
+                              const formattedDate = new Date(source.scannedAt).toLocaleDateString('en-GB', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric'
+                              });
+
+                              return (
+                                <span key={i} className="text-xs text-muted-foreground">
+                                  {source.label} · {formattedDate} ·
+                                  <span className={`inline-block ml-1 px-1.5 py-0.5 rounded text-xs font-medium ${reliabilityColor}`}>
+                                    {source.reliability}
+                                  </span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic">No traceable evidence</p>
+                        )}
+                      </div>
                     </div>
                   </div>
 

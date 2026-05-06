@@ -50,7 +50,9 @@ export const productLiabilityRules: ControlRule[] = [
     evidenceKeys: ["technical_documentation", "product_documentation"],
     articleRefs: { PRODUCT_LIABILITY: "Art. 10" },
     check: (ev) => {
-      const hasTechDoc = hasDoc(ev, "technical documentation", "product specification", "system architecture", "technical specification", "product description");
+      const hasTechDoc = hasDoc(ev, "technical documentation", "product specification", "system architecture");
+      const hasPerformanceDoc = hasDoc(ev, "performance", "testing", "test results", "conformity");
+      const hasLimitationsDoc = hasDoc(ev, "limitations", "known issues", "constraints", "intended use");
       const hasReadme = hasGitSignal(ev, "hasReadme");
       const hasArchDocs = hasGitSignal(ev, "hasArchitectureDocs");
       const gh = ev.codeSignals?.github as Record<string, unknown> | undefined;
@@ -58,20 +60,27 @@ export const productLiabilityRules: ControlRule[] = [
 
       const sources: string[] = [];
       if (hasTechDoc) sources.push("technical_documentation");
+      if (hasPerformanceDoc) sources.push("performance_testing_documentation");
+      if (hasLimitationsDoc) sources.push("product_limitations_documentation");
       if (hasReadme) sources.push("GitHub: README");
       if (hasArchDocs) sources.push("GitHub: architecture documentation");
-      if (docCount > 0) sources.push(`GitHub: ${docCount} documentation files`);
+      if (docCount > 2) sources.push(`GitHub: ${docCount} documentation files`);
 
-      const hasEvidence = hasTechDoc || hasReadme || hasArchDocs || docCount > 2;
+      const componentCount = [hasTechDoc, hasPerformanceDoc, hasLimitationsDoc].filter(Boolean).length;
+      const hasCodeDocs = hasReadme || hasArchDocs || docCount > 2;
 
       return {
-        status: hasTechDoc ? "PASS" : hasEvidence ? "PARTIAL" : "NO_EVIDENCE",
-        confidence: hasTechDoc ? 0.9 : hasEvidence ? 0.55 : 0.2,
+        status: componentCount >= 3 || (componentCount >= 2 && hasCodeDocs) ? "PASS" : (componentCount >= 1 || hasCodeDocs) ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: componentCount >= 3 ? 0.9 : (componentCount >= 2) ? 0.65 : componentCount >= 1 ? 0.45 : 0.2,
         evidenceUsed: sources,
-        gaps: hasTechDoc ? [] : ["No formal technical product documentation found"],
-        remediations: ["Maintain technical documentation describing: product specifications, intended use, known limitations, testing evidence, and conformity information"],
+        gaps: componentCount >= 3 ? [] : [
+          ...(!hasTechDoc ? ["Product specifications/architecture not documented"] : []),
+          ...(!hasPerformanceDoc ? ["Performance/testing evidence not documented"] : []),
+          ...(!hasLimitationsDoc ? ["Known limitations and intended use not documented"] : [])
+        ],
+        remediations: ["Maintain technical documentation with three components: (1) product specifications and architecture, (2) testing and performance evidence, (3) known limitations and intended use"],
         lawyerQuestions: ["Does PLD Art. 10 require us to retain technical documentation for a specific period, and what format is expected for software products?"],
-        note: hasTechDoc ? "Technical documentation found." : "PLD Art. 10 requires claimants to have access to technical documentation — producers should maintain this proactively.",
+        note: componentCount >= 3 ? "Complete technical documentation (3/3 components) verified." : componentCount >= 1 ? `Partial documentation: ${componentCount}/3 components found.` : "PLD Art. 10 requires claimants to have access to technical documentation — producers should maintain this proactively.",
       };
     },
   },
@@ -174,23 +183,28 @@ export const productLiabilityRules: ControlRule[] = [
     evidenceKeys: ["liability_limitation", "terms_of_service", "insurance"],
     articleRefs: { PRODUCT_LIABILITY: "Art. 14" },
     check: (ev) => {
-      const hasToSDoc = hasDoc(ev, "terms of service", "terms and conditions", "limitation of liability", "disclaimer", "warranty disclaimer", "indemnification");
+      const hasToS = hasDoc(ev, "terms of service", "terms and conditions", "terms of use");
+      const hasLiabilityLimit = hasDoc(ev, "limitation of liability", "disclaimer", "as-is", "no warranty", "indemnification");
       const hasPrivacyPolicy = hasDoc(ev, "privacy policy");
       const gh = ev.codeSignals?.github as Record<string, unknown> | undefined;
       const hasRepoPrivacy = !!gh?.hasPrivacyPolicy;
 
       const sources: string[] = [];
-      if (hasToSDoc) sources.push("terms_of_service");
+      if (hasToS) sources.push("terms_of_service");
+      if (hasLiabilityLimit) sources.push("liability_limitation_clause");
       if (hasPrivacyPolicy || hasRepoPrivacy) sources.push("privacy_policy");
 
       return {
-        status: hasToSDoc ? "PASS" : hasPrivacyPolicy ? "PARTIAL" : "NO_EVIDENCE",
-        confidence: hasToSDoc ? 0.85 : hasPrivacyPolicy ? 0.45 : 0.2,
+        status: hasToS && hasLiabilityLimit ? "PASS" : hasToS ? "PARTIAL" : hasPrivacyPolicy ? "PARTIAL" : "FAIL",
+        confidence: hasToS && hasLiabilityLimit ? 0.85 : hasToS ? 0.6 : 0.2,
         evidenceUsed: sources,
-        gaps: hasToSDoc ? [] : ["No terms of service or liability limitation clauses found"],
-        remediations: ["Publish comprehensive terms of service with liability limitation clauses; consult legal counsel on PLD-compliant disclaimers for software and AI products"],
+        gaps: [
+          ...(!hasToS ? ["No terms of service document found"] : []),
+          ...(hasToS && !hasLiabilityLimit ? ["Terms of service exists but explicit liability limitation clauses not found"] : [])
+        ],
+        remediations: ["Publish comprehensive terms of service with explicit liability limitation clauses; consult legal counsel on PLD 2024-compliant disclaimers for software and AI products"],
         lawyerQuestions: ["Are limitation of liability clauses in our ToS enforceable against consumers under the PLD 2024, given the directive's non-derogation principle?"],
-        note: hasToSDoc ? "Terms of service/liability docs found." : "Well-drafted ToS and disclaimers are a key layer of liability protection.",
+        note: hasToS && hasLiabilityLimit ? "ToS with liability limitations verified." : hasToS ? "ToS exists but explicit liability limitation clauses missing." : "Well-drafted ToS with liability disclaimers are a key layer of liability protection.",
       };
     },
   },

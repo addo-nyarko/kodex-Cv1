@@ -23,6 +23,14 @@ export const CONTROLS_PER_CHUNK = 2;
 const scanStateKey = (scanId: string) => `scan:${scanId}:state`;
 const scanEventsKey = (scanId: string) => `scan:${scanId}:events`;
 
+/** Evidence metadata type */
+export interface EvidenceSource {
+  type: 'github' | 'document' | 'questionnaire' | 'clarification';
+  scannedAt: string;
+  reliability: 'high' | 'medium' | 'low';
+  label: string;
+}
+
 /** Scan state stored between chunks */
 export interface ScanChunkState {
   scanId: string;
@@ -46,6 +54,8 @@ export interface ScanChunkState {
   pendingFrameworks?: Array<{ scanId: string; frameworkType: string }>;
   /** Project context for post-scan */
   projectId?: string;
+  /** Evidence sources with metadata */
+  sources: EvidenceSource[];
 }
 
 /** Save scan state to Redis (TTL 24 hours to allow long clarification waits) */

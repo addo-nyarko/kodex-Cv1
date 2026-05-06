@@ -52,6 +52,8 @@ export async function GET(
     completedAt: scan.completedAt,
     reportJson: scan.reportJson,
     shadowPassJson: scan.shadowPassJson,
+    staleEvidence: scan.staleEvidence || false,
+    staleSources: scan.staleSources ? JSON.parse(scan.staleSources) : [],
     controlResults: scan.controlResults.map((cr: any) => ({
       id: cr.id,
       status: cr.status,
@@ -59,6 +61,7 @@ export async function GET(
       gaps: cr.gaps,
       remediations: cr.remediations,
       evidenceUsed: cr.evidenceUsed,
+      evidenceSources: cr.evidenceSourcesJson ? JSON.parse(cr.evidenceSourcesJson) : [],
       note: cr.note,
       control: {
         code: cr.control.code,

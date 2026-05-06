@@ -208,20 +208,25 @@ export const cyberResilienceActRules: ControlRule[] = [
     articleRefs: { CYBER_RESILIENCE_ACT: "Annex I, Part II(5)" },
     check: (ev) => {
       const hasCVDDoc = hasDoc(ev, "vulnerability disclosure", "coordinated disclosure", "responsible disclosure", "security contact", "bug bounty", "security reporting");
+      const hasCVETracking = hasDoc(ev, "cve", "vulnerability tracking", "cvd process", "security advisory", "vulnerability registry");
       const hasSecurityMd = hasGitSignal(ev, "hasSecurityMd");
 
       const sources: string[] = [];
       if (hasCVDDoc) sources.push("coordinated_vulnerability_disclosure_policy");
+      if (hasCVETracking) sources.push("cve_vulnerability_tracking");
       if (hasSecurityMd) sources.push("GitHub: SECURITY.md (vulnerability reporting instructions)");
 
       return {
-        status: hasCVDDoc || hasSecurityMd ? "PASS" : "FAIL",
-        confidence: hasCVDDoc ? 0.9 : hasSecurityMd ? 0.8 : 0.9,
+        status: (hasCVDDoc || hasSecurityMd) && hasCVETracking ? "PASS" : (hasCVDDoc || hasSecurityMd) ? "PARTIAL" : "FAIL",
+        confidence: (hasCVDDoc || hasSecurityMd) && hasCVETracking ? 0.9 : (hasCVDDoc || hasSecurityMd) ? 0.65 : 0.9,
         evidenceUsed: sources,
-        gaps: (hasCVDDoc || hasSecurityMd) ? [] : ["No coordinated vulnerability disclosure policy published — CRA mandates this"],
-        remediations: ["Publish a SECURITY.md and a CVD policy specifying how to report vulnerabilities, expected timelines, and your security contact channel"],
+        gaps: (hasCVDDoc || hasSecurityMd) && hasCVETracking ? [] : [
+          ...(!(hasCVDDoc || hasSecurityMd) ? ["No coordinated vulnerability disclosure policy published — CRA mandates this"] : []),
+          ...(!hasCVETracking && (hasCVDDoc || hasSecurityMd) ? ["CVD policy exists but CVE/vulnerability tracking mechanism not documented"] : [])
+        ],
+        remediations: ["Publish a SECURITY.md and CVD policy with: reporting procedures, security contact, expected response timelines (e.g., 90-day disclosure), and CVE tracking process"],
         lawyerQuestions: ["Does the CRA require us to register our CVD policy with ENISA, and what are the reporting obligations for actively exploited vulnerabilities under Art. 14?"],
-        note: (hasCVDDoc || hasSecurityMd) ? "CVD policy found." : "CRA Annex I Part II(5) mandates a coordinated vulnerability disclosure policy — this is required.",
+        note: (hasCVDDoc || hasSecurityMd) && hasCVETracking ? "CVD policy with CVE tracking verified." : (hasCVDDoc || hasSecurityMd) ? "CVD policy found but CVE tracking incomplete." : "CRA Annex I Part II(5) mandates a coordinated vulnerability disclosure policy — this is required.",
       };
     },
   },
@@ -234,20 +239,25 @@ export const cyberResilienceActRules: ControlRule[] = [
     articleRefs: { CYBER_RESILIENCE_ACT: "Art. 14" },
     check: (ev) => {
       const hasReportingDoc = hasDoc(ev, "actively exploited", "enisa", "vulnerability reporting obligation", "cra reporting", "incident notification manufacturer");
+      const has24hCommitment = hasDoc(ev, "24 hours", "24h", "within 24", "enisa notification timeline", "24-hour reporting");
       const hasIRDoc = hasDoc(ev, "incident response", "security incident");
 
       const sources: string[] = [];
       if (hasReportingDoc) sources.push("exploit_reporting_procedure");
+      if (has24hCommitment) sources.push("24h_notification_commitment");
       if (hasIRDoc) sources.push("incident_response_plan");
 
       return {
-        status: hasReportingDoc ? "PASS" : hasIRDoc ? "PARTIAL" : "NO_EVIDENCE",
-        confidence: hasReportingDoc ? 0.9 : hasIRDoc ? 0.45 : 0.2,
+        status: hasReportingDoc && has24hCommitment ? "PASS" : (hasReportingDoc || hasIRDoc) ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: hasReportingDoc && has24hCommitment ? 0.9 : (hasReportingDoc || hasIRDoc) ? 0.5 : 0.2,
         evidenceUsed: sources,
-        gaps: hasReportingDoc ? [] : ["No CRA Art. 14 reporting procedure to ENISA documented"],
-        remediations: ["Document the CRA reporting process: notify ENISA within 24h of becoming aware of an actively exploited vulnerability or severe security incident"],
+        gaps: [
+          ...(!hasReportingDoc ? ["No CRA Art. 14 reporting procedure to ENISA documented"] : []),
+          ...(hasReportingDoc && !has24hCommitment ? ["Reporting procedure exists but 24-hour notification timeline not explicit"] : [])
+        ],
+        remediations: ["Document the CRA reporting process with explicit 24-hour SLA: notify ENISA within 24h of becoming aware of an actively exploited vulnerability"],
         lawyerQuestions: ["How do we determine if a vulnerability is 'actively exploited', and what constitutes a 'severe incident' under CRA Art. 14?"],
-        note: hasReportingDoc ? "Reporting procedure found." : "CRA Art. 14 requires notification to ENISA within 24h of discovering an actively exploited vulnerability.",
+        note: hasReportingDoc && has24hCommitment ? "CRA Art. 14: 24h reporting commitment documented." : (hasReportingDoc || hasIRDoc) ? "Reporting procedure found but 24h timeline not explicit." : "CRA Art. 14 requires notification to ENISA within 24h of discovering an actively exploited vulnerability.",
       };
     },
   },

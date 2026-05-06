@@ -99,6 +99,79 @@ async function processEvidencePhase(state: ScanChunkState): Promise<void> {
   const hasCodeSignals = Object.keys(evidence.codeSignals).length > 0;
   const hasRealDocuments = evidence.documents.some((d: { text: string }) => d.text.length > 100);
 
+  // Populate evidence sources with metadata
+  const evidenceSources: Array<{
+    type: 'github' | 'document' | 'questionnaire' | 'clarification';
+    scannedAt: string;
+    reliability: 'high' | 'medium' | 'low';
+    label: string;
+  }> = [];
+
+  // GitHub source
+  if (hasCodeSignals && evidence.codeSignals.github) {
+    const ghIntegration = await db.integration.findFirst({
+      where: { orgId, type: "GITHUB" },
+      select: { lastSyncAt: true },
+    });
+    if (ghIntegration?.lastSyncAt) {
+      evidenceSources.push({
+        type: 'github',
+        scannedAt: ghIntegration.lastSyncAt.toISOString(),
+        reliability: 'high',
+        label: 'GitHub repository scan',
+      });
+    }
+  }
+
+  // Document sources
+  if (hasRealDocuments && evidence.documents.length > 0) {
+    const docIds = [...new Set(evidence.documents.map((d: any) => d.evidenceId))];
+    const docs = await db.document.findMany({
+      where: { id: { in: docIds } },
+      select: { id: true, title: true, fileName: true, createdAt: true },
+    });
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    for (const doc of docs) {
+      const isStale = doc.createdAt < thirtyDaysAgo;
+      evidenceSources.push({
+        type: 'document',
+        scannedAt: doc.createdAt.toISOString(),
+        reliability: isStale ? 'medium' : 'high',
+        label: doc.title || doc.fileName || 'Uploaded document',
+      });
+    }
+  }
+
+  // Questionnaire source
+  if (Object.keys(evidence.questionnaire).length > 0) {
+    const org = await db.organization.findUnique({
+      where: { id: orgId },
+      select: { createdAt: true },
+    });
+    if (org) {
+      evidenceSources.push({
+        type: 'questionnaire',
+        scannedAt: org.createdAt.toISOString(),
+        reliability: 'low',
+        label: 'Onboarding questionnaire',
+      });
+    }
+  }
+
+  // Clarification sources
+  if (Object.keys(evidence.clarifications).length > 0) {
+    evidenceSources.push({
+      type: 'clarification',
+      scannedAt: new Date().toISOString(),
+      reliability: 'medium',
+      label: 'User clarifications',
+    });
+  }
+
+  state.sources = evidenceSources;
+
   // Build sources description
   const sources: string[] = [];
   if (hasRealDocuments) sources.push(`${evidence.documents.length} document chunks`);
@@ -169,6 +242,7 @@ async function processEvidencePhase(state: ScanChunkState): Promise<void> {
   state.evidencePrepared = true;
   state.evidenceKey = evidenceKey;
   state.useLLM = hasRealDocuments || hasCodeSignals;
+  // sources already populated above
   await saveScanState(state);
 
   // Queue the first controls chunk
@@ -250,14 +324,14 @@ async function processControlsPhase(state: ScanChunkState): Promise<void> {
       await saveScanState(state);
 
       // Save the partial result
-      await saveControlResult(scanId, orgId, frameworkType, rule, raw);
+      await saveControlResult(scanId, orgId, frameworkType, rule, raw, state.sources);
 
       // Don't queue next chunk — wait for clarification
       return;
     }
 
     // Save control result to DB
-    await saveControlResult(scanId, orgId, frameworkType, rule, raw);
+    await saveControlResult(scanId, orgId, frameworkType, rule, raw, state.sources);
   }
 
   // Update state for next chunk
@@ -370,6 +444,13 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
     }
   }
 
+  // Check for stale evidence (sources older than 30 days)
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const staleSources = state.sources.filter((s) => new Date(s.scannedAt) < thirtyDaysAgo);
+  const staleEvidence = staleSources.length > 0;
+  const staleSourcesToSave = staleEvidence ? staleSources.map((s) => s.label) : [];
+
   // Mark scan complete
   await db.scan.update({
     where: { id: scanId },
@@ -380,6 +461,8 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
       score: report.score,
       riskLevel: report.riskLevel,
       completedAt: new Date(),
+      staleEvidence,
+      staleSources: staleEvidence ? JSON.stringify(staleSourcesToSave) : null,
     },
   });
 
@@ -469,6 +552,7 @@ async function processPostPhase(state: ScanChunkState): Promise<void> {
       phase: "controls", // Skip evidence phase — already done
       projectId: state.projectId, // Preserve project context
       pendingFrameworks: remaining.length > 0 ? remaining : undefined,
+      sources: state.sources, // Reuse sources from first framework
     };
 
     // Get control count for next framework
@@ -493,7 +577,8 @@ async function saveControlResult(
   orgId: string,
   frameworkType: string,
   rule: { id: string; code: string },
-  raw: ControlEvalResult
+  raw: ControlEvalResult,
+  sources?: Array<{ type: string; scannedAt: string; reliability: string; label: string }>
 ): Promise<void> {
   const control = await db.control.findFirst({
     where: {
@@ -515,6 +600,7 @@ async function saveControlResult(
         remediations: raw.remediations,
         lawyerQuestions: raw.lawyerQuestions,
         note: raw.note,
+        evidenceSourcesJson: sources ? JSON.stringify(sources) : null,
       },
       update: {
         status: raw.status,
@@ -524,6 +610,7 @@ async function saveControlResult(
         remediations: raw.remediations,
         lawyerQuestions: raw.lawyerQuestions,
         note: raw.note,
+        evidenceSourcesJson: sources ? JSON.stringify(sources) : null,
       },
     });
   } else {

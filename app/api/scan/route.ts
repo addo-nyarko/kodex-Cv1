@@ -101,6 +101,7 @@ export async function POST(req: NextRequest) {
     phase: "evidence",
     projectId: projectId || undefined,
     pendingFrameworks,
+    sources: [],
   };
 
   await saveScanState(initialState);

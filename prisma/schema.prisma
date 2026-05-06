@@ -483,6 +483,9 @@ model Scan {
   riskLevel    String?
   score        Int?
 
+  staleEvidence Boolean @default(false)
+  staleSources  String?  @db.Text
+
   startedAt    DateTime?
   completedAt  DateTime?
   errorMessage String?   @db.Text
@@ -511,11 +514,12 @@ model ScanControlResult {
   status     ControlResultStatus
   confidence Float
 
-  evidenceUsed    String[]
-  gaps            String[]
-  remediations    String[]
-  lawyerQuestions String[]
-  note            String?  @db.Text
+  evidenceUsed        String[]
+  evidenceSourcesJson String?  @db.Text
+  gaps                String[]
+  remediations        String[]
+  lawyerQuestions     String[]
+  note                String?  @db.Text
 
   inheritedFromScanId String?
 

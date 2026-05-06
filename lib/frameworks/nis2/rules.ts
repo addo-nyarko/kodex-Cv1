@@ -41,19 +41,26 @@ export const nis2Rules: ControlRule[] = [
     check: (ev) => {
       const hasRiskDoc = hasDoc(ev, "risk analysis", "risk assessment", "information security policy", "isms", "cyber risk");
       const notionHasSecPolicy = hasNotionSignal(ev, "hasSecurityPolicy");
+      const hasAuth = hasGitSignal(ev, "hasAuth");
+      const hasEncryption = hasGitSignal(ev, "hasEncryption");
+
+      const anyPolicy = hasRiskDoc || notionHasSecPolicy;
+      const hasCodeSignals = hasAuth || hasEncryption;
 
       const sources: string[] = [];
       if (hasRiskDoc) sources.push("risk_analysis_policy");
       if (notionHasSecPolicy) sources.push("Notion: security policy");
+      if (hasAuth) sources.push("GitHub: authentication");
+      if (hasEncryption) sources.push("GitHub: encryption");
 
       return {
-        status: hasRiskDoc || notionHasSecPolicy ? "PASS" : "NO_EVIDENCE",
-        confidence: hasRiskDoc ? 0.9 : notionHasSecPolicy ? 0.75 : 0.2,
+        status: anyPolicy && hasCodeSignals ? "PASS" : anyPolicy ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: anyPolicy && hasCodeSignals ? 0.9 : anyPolicy ? 0.55 : 0.2,
         evidenceUsed: sources,
-        gaps: (hasRiskDoc || notionHasSecPolicy) ? [] : ["No risk analysis policy or information security policy found"],
-        remediations: ["Establish a documented risk analysis process and information security policy covering identification, assessment, and treatment of cybersecurity risks"],
+        gaps: anyPolicy ? (hasCodeSignals ? [] : ["Policy documented but no technical security controls detected"]) : ["No risk analysis policy or information security policy found"],
+        remediations: anyPolicy ? ["Implement technical security controls: authentication, encryption, and logging per NIS2 Art. 21(2)(e)"] : ["Establish a documented risk analysis process and information security policy covering identification, assessment, and treatment of cybersecurity risks"],
         lawyerQuestions: ["Are we in scope for NIS2 as an essential or important entity, and what sector-specific requirements apply to our risk management obligations?"],
-        note: (hasRiskDoc || notionHasSecPolicy) ? "Risk/security policy found." : "NIS2 Art. 21(2)(a) requires documented risk analysis and security policies.",
+        note: anyPolicy && hasCodeSignals ? "Risk/security policy with technical enforcement verified." : anyPolicy ? "Risk/security policy found but enforcement not verified." : "NIS2 Art. 21(2)(a) requires documented risk analysis and security policies plus technical controls.",
       };
     },
   },
@@ -244,22 +251,27 @@ export const nis2Rules: ControlRule[] = [
     articleRefs: { NIS2: "Art. 23" },
     check: (ev) => {
       const hasReportingDoc = hasDoc(ev, "incident reporting", "notification obligation", "csirt", "competent authority", "significant incident");
+      const hasTimeframeDoc = hasDoc(ev, "24 hours", "72 hours", "within 24", "within 72", "24h", "72h", "early warning");
       const hasIRDoc = hasDoc(ev, "incident response", "incident handling");
       const notionHasIR = hasNotionSignal(ev, "hasIncidentResponse");
 
       const sources: string[] = [];
       if (hasReportingDoc) sources.push("incident_reporting_procedure");
+      if (hasTimeframeDoc) sources.push("reporting_timeframe_24h_72h");
       if (hasIRDoc) sources.push("incident_response_plan");
       if (notionHasIR) sources.push("Notion: incident response");
 
       return {
-        status: hasReportingDoc ? "PASS" : hasIRDoc || notionHasIR ? "PARTIAL" : "NO_EVIDENCE",
-        confidence: hasReportingDoc ? 0.9 : hasIRDoc ? 0.5 : 0.2,
+        status: hasReportingDoc && hasTimeframeDoc ? "PASS" : hasReportingDoc || hasIRDoc || notionHasIR ? "PARTIAL" : "NO_EVIDENCE",
+        confidence: hasReportingDoc && hasTimeframeDoc ? 0.9 : (hasReportingDoc || hasIRDoc) ? 0.5 : 0.2,
         evidenceUsed: sources,
-        gaps: hasReportingDoc ? [] : ["No NIS2 Art. 23 incident reporting procedure documented"],
+        gaps: hasReportingDoc && hasTimeframeDoc ? [] : [
+          ...(!hasReportingDoc ? ["No NIS2 Art. 23 incident reporting procedure documented"] : []),
+          ...(!hasTimeframeDoc && (hasReportingDoc || hasIRDoc) ? ["Reporting procedure lacks explicit 24h (early warning) and 72h (notification) timelines"] : [])
+        ],
         remediations: ["Document the NIS2 incident reporting timeline: early warning to CSIRT within 24h, incident notification within 72h, final report within 1 month"],
         lawyerQuestions: ["Which national CSIRT or competent authority must we notify for incidents, and what thresholds trigger NIS2 Art. 23 reporting?"],
-        note: hasReportingDoc ? "Incident reporting procedure found." : "NIS2 Art. 23 requires notification to CSIRT within 24h (early warning) and 72h (notification) for significant incidents.",
+        note: hasReportingDoc && hasTimeframeDoc ? "Incident reporting with 24h/72h SLA found." : (hasReportingDoc || hasIRDoc) ? "Incident reporting procedure found but timeframes not explicit." : "NIS2 Art. 23 requires notification to CSIRT within 24h (early warning) and 72h (notification) for significant incidents.",
       };
     },
   },
