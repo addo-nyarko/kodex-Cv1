@@ -48,9 +48,9 @@ export interface ScanChunkState {
   projectId?: string;
 }
 
-/** Save scan state to Redis (TTL 1 hour) */
+/** Save scan state to Redis (TTL 24 hours to allow long clarification waits) */
 export async function saveScanState(state: ScanChunkState): Promise<void> {
-  await redis.set(scanStateKey(state.scanId), JSON.stringify(state), { ex: 3600 });
+  await redis.set(scanStateKey(state.scanId), JSON.stringify(state), { ex: 86400 });
 }
 
 /** Load scan state from Redis */

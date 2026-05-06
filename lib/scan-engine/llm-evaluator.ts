@@ -53,6 +53,67 @@ export async function evaluateControlWithLLM(
   // Build code signals context from integrations (GitHub, etc.)
   const codeSignalContext = buildCodeSignalContext(evidence.codeSignals, rule);
 
+  const systemPrompt = `You are a compliance auditor evaluating regulatory controls for accuracy and consistency.
+
+## Status Definitions (strict)
+
+PASS: Control requirement is explicitly implemented AND documented.
+  - ≥1 document section addresses the requirement with implementation details (not just policy intent), OR
+  - ≥2 independent GitHub signals directly related to this control (e.g., CI/CD + tests for quality requirements), OR
+  - Code signals + document aligned (both present and consistent)
+  Example PASS for documentation requirement: "Security Policy (v2, 2025-01) states: 'All data is encrypted with AES-256.' GitHub repo contains encryption library imports."
+
+PARTIAL: Requirement partially addressed — policy exists but implementation unclear, or code exists but documentation missing.
+  - Document mentions requirement but no implementation steps shown, OR
+  - Code signals show related capability but no formal policy/docs, OR
+  - Implementation incomplete (e.g., "encryption planned" or "partial rollout")
+  Example PARTIAL: "Document outlines encryption strategy but no evidence of actual deployment. GitHub has encryption library but no active use in critical paths."
+
+FAIL: Requirement explicitly NOT met OR evidence contradicts control.
+  - Document explicitly states non-compliance (e.g., "We do not encrypt data"), OR
+  - Policy requires X but code signals show the opposite, OR
+  - Implementation exists but fails to meet standard (e.g., "passwords stored in plaintext")
+  Example FAIL: "Security policy requires encryption but codebase contains hardcoded credentials and no encryption libraries."
+
+NO_EVIDENCE: No mention of this requirement anywhere in documents, code signals, or clarifications.
+  - No keyword matches in documents, OR
+  - No related GitHub signals, OR
+  - Company size/type makes requirement likely N/A but not explicitly stated
+  Example NO_EVIDENCE: "No documents or code signals mention this control. Clarification needed to determine applicability."
+
+## Contradictory Evidence Rule
+
+IF questionnaire answer contradicts code signals:
+  - Default to code signals (automated, higher reliability).
+  - Note contradiction in gaps field: "Questionnaire states X, but codebase indicates Y — code signals take precedence."
+  Example: User says "no AI" but GitHub shows tensorflow imports → note contradiction, evaluate based on code.
+
+## Confidence Calibration (strict ranges)
+
+0.9–1.0: Multiple independent sources align (documents + code signals + questionnaire all agree).
+  Example: Policy doc + GitHub CI/CD + user confirmation = 0.95
+
+0.7–0.89: Two sources present and consistent, third silent or weak.
+  Example: Document + code signals aligned, no questionnaire = 0.8
+
+0.5–0.69: Single strong source (e.g., detailed doc) OR two sources partially align.
+  Example: Document detailed + code signals ambiguous = 0.6
+
+0.3–0.49: Single weak signal (keyword match only, no implementation evidence).
+  Example: Document mentions word "encryption" but no details = 0.35
+
+<0.3: No direct evidence, only inference or assumptions.
+  Example: Company is in finance → assume data sensitivity, but no actual evidence = 0.2
+
+## Automated Code Signals
+
+GitHub repo scans are real evidence of what the company has. Use them aggressively:
+- hasAuth=true → evidence for access control, authentication requirements
+- hasCI + hasTests → evidence for quality management, change control, testing
+- hasEncryption → evidence for data protection, security controls
+- docCount + hasReadme → evidence for documentation, transparency requirements
+If a GitHub signal is present AND related to the control, add 0.1–0.2 to confidence (it's real implementation evidence).`;
+
   const prompt = `You are a compliance auditor evaluating a specific regulatory control.
 
 ## Control being evaluated
@@ -72,32 +133,24 @@ ${codeSignalContext}
 ## Your task
 Evaluate whether the uploaded documents AND code/infrastructure signals satisfy this compliance control.
 
-IMPORTANT: Code signals from GitHub repo scans are real automated evidence — they show what the company actually has in their codebase. Use them to make stronger assessments. For example:
-- If code signals show authentication middleware exists, that's evidence for access control requirements
-- If code signals show CI/CD with tests, that's evidence for quality assurance and change management
-- If code signals show encryption libraries, that's evidence for data protection measures
+Use the status definitions and confidence ranges provided in the system prompt.
+If questionnaire contradicts code signals, default to code signals and note the contradiction.
 
 You MUST respond with a JSON object matching this exact structure:
 {
   "status": "PASS" | "FAIL" | "PARTIAL" | "NO_EVIDENCE",
-  "confidence": <number 0-1>,
-  "evidenceUsed": [<list of document filenames or "GitHub repo scan" used>],
-  "citations": [<direct quotes from documents that support your finding, max 3>],
-  "gaps": [<specific compliance gaps found, be precise>],
-  "remediations": [<concrete actionable steps to fix each gap>],
-  "lawyerQuestions": [<questions a lawyer should answer, max 2>],
-  "note": "<1-2 sentence summary of your finding>"
+  "confidence": <number 0-1, use calibration ranges from system prompt>,
+  "summary": "<1-2 sentences: what did you find?>",
+  "gaps": [<specific missing items if not PASS, be precise; empty if PASS>],
+  "remediations": [<concrete actionable steps to fix each gap; empty if PASS>],
+  "evidenceUsed": [<which sources contributed: document filenames, "GitHub repo scan", "questionnaire", "clarification">]
 }
 
 Rules:
-- PASS = the control is clearly satisfied by the evidence
-- PARTIAL = some aspects are covered but gaps remain
-- FAIL = evidence exists but does not satisfy the control
-- NO_EVIDENCE = no relevant evidence found for this control
-- Always cite direct quotes when possible
-- Be specific about what is missing, not generic
-- Confidence should reflect how sure you are (0.9+ for clear evidence, 0.4-0.6 for ambiguous)
-- When code signals provide strong automated evidence, confidence should be at least 0.5
+- PASS/FAIL/PARTIAL/NO_EVIDENCE must match definitions in system prompt exactly
+- Confidence must fall in ranges defined above (0.9+, 0.7–0.89, 0.5–0.69, 0.3–0.49, <0.3)
+- Be specific about gaps, not generic
+- When contradictions exist between evidence sources, explicitly note them
 
 Return ONLY the JSON object, no markdown fencing.`;
 
@@ -110,6 +163,7 @@ Return ONLY the JSON object, no markdown fencing.`;
         {
           model: AI_MODELS.FAST,
           max_tokens: 1000,
+          system: systemPrompt,
           messages: [{ role: "user", content: prompt }],
         },
         { signal: controller.signal }
@@ -129,13 +183,7 @@ Return ONLY the JSON object, no markdown fencing.`;
       return rule.check(evidence);
     }
 
-    const parsed = JSON.parse(match[0]) as ControlEvalResult & { citations?: string[] };
-
-    // Merge citations into the note for visibility
-    const citations = parsed.citations ?? [];
-    const noteWithCitations = citations.length > 0
-      ? `${parsed.note}\n\nCited evidence:\n${citations.map((c) => `  "${c}"`).join("\n")}`
-      : parsed.note;
+    const parsed = JSON.parse(match[0]) as ControlEvalResult & { summary?: string };
 
     return {
       status: parsed.status,
@@ -144,7 +192,7 @@ Return ONLY the JSON object, no markdown fencing.`;
       gaps: parsed.gaps ?? [],
       remediations: parsed.remediations ?? [],
       lawyerQuestions: parsed.lawyerQuestions ?? [],
-      note: noteWithCitations,
+      note: parsed.summary ?? parsed.note ?? "",
     };
   } catch (err) {
     console.error(`LLM evaluation failed for ${rule.code}:`, err);

@@ -68,27 +68,27 @@ export async function POST(
   // Try to load existing state from Redis
   let state = await loadScanState(scanId);
 
-  if (state) {
-    // Resume from where we left off — move past the control that needed clarification
-    state.controlIndex = state.controlIndex + 1;
-    state.clarificationAsked = false;
-    await saveScanState(state);
-  } else {
-    // State expired — reinitialize from scratch
-    const plugin = frameworkRegistry.get(scan.framework.type);
-    const newState: ScanChunkState = {
-      scanId,
-      frameworkType: scan.framework.type,
-      orgId,
-      controlIndex: 0,
-      totalControls: plugin?.rules.length ?? 0,
-      evidencePrepared: false,
-      useLLM: false,
-      clarificationAsked: false,
-      phase: "evidence", // Re-assemble evidence since it expired
-    };
-    await saveScanState(newState);
+  if (!state) {
+    // State expired (Redis TTL exceeded) — do NOT silently reinitialize
+    // Return error to client so user sees a clear message
+    await db.scan.update({
+      where: { id: scanId },
+      data: {
+        status: "FAILED",
+        errorMessage: "Scan session expired. Your answers were saved but the scan state timed out. Please start a new scan.",
+      },
+    });
+    return Response.json({
+      ok: false,
+      expired: true,
+      message: "Your scan session expired. Your answers have been saved. Please start a new scan with the same frameworks to continue.",
+    }, { status: 410 });
   }
+
+  // Resume from where we left off — move past the control that needed clarification
+  state.controlIndex = state.controlIndex + 1;
+  state.clarificationAsked = false;
+  await saveScanState(state);
 
   // Queue the next chunk
   await queueNextChunk(scanId);
