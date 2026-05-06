@@ -264,14 +264,14 @@ export default function DocumentsPage() {
           </div>
 
           {/* Tabs */}
-          <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+          <div className="flex items-center gap-2">
             {TABS.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                   activeTab === tab.key
-                    ? "bg-card text-foreground shadow-sm"
+                    ? "bg-blue-600 text-white"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -369,19 +369,28 @@ export default function DocumentsPage() {
               </div>
             </div>
             <h3 className="text-lg font-semibold text-foreground mb-2">
-              No documents yet
+              {activeTab === "EVIDENCE" ? "No evidence yet" : "No documents yet"}
             </h3>
             <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              Documents from scans, generated policies, and uploads will appear
-              here. Upload a document or run a compliance scan to get started.
+              {activeTab === "EVIDENCE"
+                ? "Evidence is collected automatically during scans. Run a compliance scan to gather evidence."
+                : activeTab === "POLICY"
+                ? "Policies are generated automatically to address compliance gaps found during scans."
+                : activeTab === "SCAN_REPORT"
+                ? "Scan reports are generated when you complete a compliance scan."
+                : activeTab === "UPLOAD"
+                ? "Upload documents that support your compliance posture."
+                : "Documents from scans, generated policies, and uploads will appear here."}
             </p>
-            <button
-              onClick={() => setShowUploadZone(true)}
-              className="mt-5 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-            >
-              <Upload className="w-4 h-4" />
-              Upload your first document
-            </button>
+            {activeTab === "UPLOAD" && (
+              <button
+                onClick={() => setShowUploadZone(true)}
+                className="mt-5 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+              >
+                <Upload className="w-4 h-4" />
+                Upload your first document
+              </button>
+            )}
           </motion.div>
         )}
 
@@ -398,7 +407,15 @@ export default function DocumentsPage() {
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.03 }}
-                  className="bg-card border border-border rounded-lg p-4 hover:border-blue-600/30 transition-colors group"
+                  className={`bg-card border rounded-lg p-4 hover:border-blue-600/30 transition-colors group ${
+                    doc.category === "POLICY"
+                      ? "border-l-4 border-l-blue-500 border-border"
+                      : doc.category === "SCAN_REPORT"
+                      ? "border-l-4 border-l-purple-500 border-border"
+                      : doc.category === "EVIDENCE"
+                      ? "border-l-4 border-l-amber-500 border-border"
+                      : "border-l-4 border-l-gray-400 border-border"
+                  }`}
                 >
                   <div className="flex items-center gap-4">
                     {/* Icon */}
@@ -436,27 +453,18 @@ export default function DocumentsPage() {
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                        <span>{formatDate(doc.createdAt)}</span>
-                        {doc.fileSize && (
-                          <>
-                            <span className="text-border">|</span>
-                            <span>{formatFileSize(doc.fileSize)}</span>
-                          </>
-                        )}
-                        {doc.projectName && (
-                          <>
-                            <span className="text-border">|</span>
-                            <span>{doc.projectName}</span>
-                          </>
-                        )}
-                        {doc.fileName && (
-                          <>
-                            <span className="text-border">|</span>
-                            <span className="truncate max-w-[200px]">
-                              {doc.fileName}
-                            </span>
-                          </>
+                      <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-3">
+                          <span>{formatDate(doc.createdAt)}</span>
+                          {doc.projectName && (
+                            <>
+                              <span className="text-border">|</span>
+                              <span>{doc.projectName}</span>
+                            </>
+                          )}
+                        </div>
+                        {doc.fileSize && doc.fileSize > 0 && (
+                          <span>{formatFileSize(doc.fileSize)}</span>
                         )}
                       </div>
                     </div>

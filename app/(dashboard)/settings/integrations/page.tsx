@@ -278,7 +278,7 @@ export default function IntegrationsPage() {
                           <button
                             onClick={handleLoadRepos}
                             disabled={loadingRepos}
-                            className="px-4 py-2 bg-primary rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                            className="px-4 py-2 border border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 rounded-lg text-sm font-medium hover:bg-blue-600/10 dark:hover:bg-blue-400/10 disabled:opacity-50"
                           >
                             {loadingRepos ? "Loading..." : "Select Repo to Scan"}
                           </button>
@@ -287,14 +287,14 @@ export default function IntegrationsPage() {
                           <button
                             onClick={() => handleSyncIntegration(def.type)}
                             disabled={syncing === def.type}
-                            className="px-4 py-2 bg-primary rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                            className="px-4 py-2 border border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 rounded-lg text-sm font-medium hover:bg-blue-600/10 dark:hover:bg-blue-400/10 disabled:opacity-50"
                           >
                             {syncing === def.type ? "Scanning..." : "Scan for Evidence"}
                           </button>
                         )}
                         <button
                           onClick={() => handleDisconnect(def.type)}
-                          className="px-4 py-2 bg-muted border border-border rounded-lg text-sm text-foreground/80 hover:bg-accent"
+                          className="px-4 py-2 border border-red-500/30 text-red-500 dark:text-red-400 rounded-lg text-sm font-medium hover:bg-red-500/10 dark:hover:bg-red-400/10"
                         >
                           Disconnect
                         </button>
@@ -302,7 +302,7 @@ export default function IntegrationsPage() {
                     ) : def.available ? (
                       <button
                         onClick={() => handleConnect(def.type)}
-                        className="px-4 py-2 bg-primary rounded-lg text-sm font-medium hover:bg-primary/90"
+                        className="px-4 py-2 border border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 rounded-lg text-sm font-medium hover:bg-blue-600/10 dark:hover:bg-blue-400/10"
                       >
                         Connect
                       </button>
