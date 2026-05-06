@@ -217,9 +217,11 @@ export default function ScanRunner() {
         }
         const data = await res.json();
 
-        // Append new narration events from the first active scan
-        if (!eventCountRef.current && data.events && data.events.length > 0) {
+        // Append new narration events
+        if (data.events && data.events.length > 0) {
           setEvents((prev) => [...prev, ...data.events]);
+        }
+        if (data.eventCount) {
           eventCountRef.current = data.eventCount;
         }
 
@@ -267,15 +269,6 @@ export default function ScanRunner() {
       setScanning(false);
       scanningRef.current = false;
       if (pollRef.current) clearInterval(pollRef.current);
-    }
-
-    // If any scan is awaiting clarification, redirect to AI assistant with that scan ID and question
-    if (hasAwaiting && awaitingScanId) {
-      setScanning(false);
-      scanningRef.current = false;
-      if (pollRef.current) clearInterval(pollRef.current);
-      const questionParam = awaitingQuestion ? `&question=${encodeURIComponent(awaitingQuestion)}` : "";
-      router.push(`/ai-assistant?scanId=${awaitingScanId}${questionParam}`);
     }
   }, [completedScanIds, router]);
 

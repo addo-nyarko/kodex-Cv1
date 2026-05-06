@@ -63,6 +63,7 @@ export default function ChatAssistant() {
   const [showFrameworkSelector, setShowFrameworkSelector] = useState(false);
   const [availableFrameworks, setAvailableFrameworks] = useState<any[]>([]);
   const [selectingFramework, setSelectingFramework] = useState(false);
+  const clarificationTextareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const eventsEndRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
@@ -148,6 +149,9 @@ export default function ChatAssistant() {
     setClarificationError(null);
     setShowClarificationSkip(false);
 
+    // Auto-focus clarification textarea
+    setTimeout(() => clarificationTextareaRef.current?.focus(), 100);
+
     if (clarificationTimerRef.current) clearTimeout(clarificationTimerRef.current);
     clarificationTimerRef.current = setTimeout(() => {
       setShowClarificationSkip(true);
@@ -163,7 +167,25 @@ export default function ChatAssistant() {
     if (initializedRef.current) return;
     initializedRef.current = true;
 
-    if (scanId && pendingQuestion) {
+    // Load scan from URL on mount
+    if (scanId && !activeScan) {
+      fetch(`/api/scan/${scanId}`)
+        .then((res) => res.json())
+        .then((data) => {
+          setActiveScan(data);
+          if (data.status === "AWAITING_CLARIFICATION" && data.pendingQuestion) {
+            askedQuestionRef.current = data.pendingQuestion;
+            setMessages([
+              {
+                role: "assistant",
+                content: `I'm running a compliance scan and need a bit more information to evaluate one of the controls accurately.\n\n**${data.pendingQuestion}**\n\nPlease provide your answer below and I'll resume the scan automatically.`,
+                type: "clarification",
+              },
+            ]);
+          }
+        })
+        .catch(() => {});
+    } else if (scanId && pendingQuestion) {
       askedQuestionRef.current = pendingQuestion;
       setMessages([
         {
@@ -173,7 +195,7 @@ export default function ChatAssistant() {
         },
       ]);
     }
-  }, [scanId, pendingQuestion]);
+  }, [scanId, pendingQuestion, activeScan, setActiveScan]);
 
   // Reset tracking when scanId changes (new scan)
   useEffect(() => {
@@ -272,7 +294,6 @@ export default function ChatAssistant() {
             },
           ]);
           scrollToBottom();
-          setTimeout(() => router.push(`/scans/${scanId}`), 30000);
           clearInterval(interval);
         } else if (data.status === "FAILED") {
           setScanPollStatus("failed");
@@ -423,7 +444,6 @@ export default function ChatAssistant() {
             type: "scan-status",
           },
         ]);
-        setTimeout(() => router.push(`/scans/${scanId}`), 30000);
         return true;
       }
 
@@ -1069,6 +1089,7 @@ export default function ChatAssistant() {
             {/* Answer input */}
             <div>
               <textarea
+                ref={clarificationTextareaRef}
                 value={clarificationAnswer}
                 onChange={(e) => {
                   setClarificationAnswer(e.target.value);
@@ -1119,6 +1140,11 @@ export default function ChatAssistant() {
           </div>
         )}
 
+        {needsClarification && (
+          <div className="text-xs text-amber-400/70 px-1">
+            Your scan is paused. Answer the question above to continue.
+          </div>
+        )}
         {isInScanMode && !clarificationSubmitted && !needsClarification && (
           <div className="text-xs text-yellow-500 px-1">
             Answer the question above to resume your scan
