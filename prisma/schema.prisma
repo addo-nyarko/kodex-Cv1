@@ -520,6 +520,7 @@ model ScanControlResult {
   remediations        String[]
   lawyerQuestions     String[]
   note                String?  @db.Text
+  evaluationError     String?  @db.Text
 
   inheritedFromScanId String?
 

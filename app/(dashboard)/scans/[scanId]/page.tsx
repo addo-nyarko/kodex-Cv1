@@ -36,6 +36,7 @@ interface ControlResult {
   remediations: string[];
   note: string;
   evidenceSources: EvidenceSource[];
+  evaluationError: string | null;
   control: Control;
 }
 
@@ -286,6 +287,13 @@ export default function ScanResultsPage() {
                       <p className="text-xs text-muted-foreground">
                         Confidence: {Math.round(result.confidence)}%
                       </p>
+
+                      {/* Evaluation Error Indicator */}
+                      {result.evaluationError && (
+                        <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                          ⚠️ Auto-evaluation failed — manual review needed
+                        </p>
+                      )}
 
                       {/* Evidence Sources */}
                       <div className="mt-2">

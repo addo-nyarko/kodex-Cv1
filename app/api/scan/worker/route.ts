@@ -258,6 +258,25 @@ async function processControlsPhase(state: ScanChunkState): Promise<void> {
   const plugin = frameworkRegistry.get(frameworkType);
   if (!plugin) throw new Error(`Unknown framework: ${frameworkType}`);
 
+  // Safety net: ensure Control rows exist before evaluation
+  // This is called again here (also called in processEvidencePhase) to guarantee
+  // Control rows exist even if the evidence phase was skipped (multi-framework reuse)
+  try {
+    const framework = await db.framework.findFirst({
+      where: { orgId, type: frameworkType as FrameworkType },
+    });
+    if (framework) {
+      await ensureControlsForFramework(framework.id, frameworkType);
+    }
+  } catch (err) {
+    console.error(`[processControlsPhase] Failed to ensure controls for ${frameworkType}:`, err);
+    // Don't fail the scan if this fails, but log it for debugging
+    await pushScanEvent(
+      scanId,
+      `Warning: Could not verify control setup — some results may not save. Error: ${err instanceof Error ? err.message : "Unknown error"}`
+    );
+  }
+
   // Load evidence from Redis
   const evidence = (await loadEvidence(state.evidenceKey!)) as EvidencePool;
   if (!evidence) throw new Error("Evidence not found in Redis — expired?");
@@ -280,58 +299,86 @@ async function processControlsPhase(state: ScanChunkState): Promise<void> {
       continue;
     }
 
-    // Evaluate control
-    let raw: ControlEvalResult;
-    if (state.useLLM) {
-      raw = await evaluateControlWithLLM(rule, evidence);
-    } else {
-      raw = runControl(rule, evidence);
-    }
+    try {
+      // Evaluate control
+      let raw: ControlEvalResult;
+      if (state.useLLM) {
+        raw = await evaluateControlWithLLM(rule, evidence);
+      } else {
+        raw = runControl(rule, evidence);
+      }
 
-    // Confidence boosts
-    if (evidence.clarifications[rule.code]) {
-      raw.confidence = Math.max(raw.confidence, 0.5);
-    }
-    if (Object.keys(evidence.codeSignals).length > 0 && raw.confidence >= 0.3 && raw.confidence < 0.5) {
-      raw.confidence = Math.min(raw.confidence + 0.15, 0.6);
-    }
+      // Confidence boosts
+      if (evidence.clarifications[rule.code]) {
+        raw.confidence = Math.max(raw.confidence, 0.5);
+      }
+      if (Object.keys(evidence.codeSignals).length > 0 && raw.confidence >= 0.3 && raw.confidence < 0.5) {
+        raw.confidence = Math.min(raw.confidence + 0.15, 0.6);
+      }
 
-    // One-line status update instead of verbose narration
-    const statusMessage = `Evaluating ${rule.code}: ${rule.title}`;
-    await pushScanEvent(scanId, statusMessage);
+      // One-line status update instead of verbose narration
+      const statusMessage = `Evaluating ${rule.code}: ${rule.title}`;
+      await pushScanEvent(scanId, statusMessage);
 
-    // Check if clarification is needed
-    if (
-      raw.confidence < 0.35 &&
-      raw.status !== "PASS" &&
-      !state.clarificationAsked &&
-      !evidence.clarifications[rule.code]
-    ) {
-      const question = await generateClarificationQuestion(rule, evidence);
-      await pushScanEvent(scanId, `Clarification needed for ${rule.code}`);
+      // Check if clarification is needed
+      if (
+        raw.confidence < 0.35 &&
+        raw.status !== "PASS" &&
+        !state.clarificationAsked &&
+        !evidence.clarifications[rule.code]
+      ) {
+        const question = await generateClarificationQuestion(rule, evidence);
+        await pushScanEvent(scanId, `Clarification needed for ${rule.code}`);
 
-      await db.scan.update({
-        where: { id: scanId },
-        data: {
-          status: "AWAITING_CLARIFICATION",
-          pendingQuestion: question,
-          pendingControlCode: rule.code,
-        },
-      });
+        await db.scan.update({
+          where: { id: scanId },
+          data: {
+            status: "AWAITING_CLARIFICATION",
+            pendingQuestion: question,
+            pendingControlCode: rule.code,
+          },
+        });
 
-      state.clarificationAsked = true;
-      state.controlIndex = i; // Resume from this control after clarification
-      await saveScanState(state);
+        state.clarificationAsked = true;
+        state.controlIndex = i; // Resume from this control after clarification
+        await saveScanState(state);
 
-      // Save the partial result
+        // Save the partial result
+        await saveControlResult(scanId, orgId, frameworkType, rule, raw, state.sources);
+
+        // Don't queue next chunk — wait for clarification
+        return;
+      }
+
+      // Save control result to DB
       await saveControlResult(scanId, orgId, frameworkType, rule, raw, state.sources);
+    } catch (err) {
+      // Isolate this control's failure — don't fail entire scan
+      const errorMsg = err instanceof Error ? err.message : "Unknown error";
+      console.error(`[control-isolation] Failed to evaluate ${rule.code}:`, err);
 
-      // Don't queue next chunk — wait for clarification
-      return;
+      // Save as NO_EVIDENCE with error marker
+      await saveControlResult(
+        scanId,
+        orgId,
+        frameworkType,
+        rule,
+        {
+          status: "NO_EVIDENCE",
+          confidence: 0,
+          evidenceUsed: [],
+          gaps: ["Automated evaluation error — manual review required"],
+          remediations: ["Review this control manually"],
+          lawyerQuestions: [],
+          note: "",
+        },
+        state.sources,
+        errorMsg // Pass error to be stored
+      );
+
+      // Push event but don't stop scan
+      await pushScanEvent(scanId, `⚠️ ${rule.code}: Auto-evaluation failed, marked for manual review`);
     }
-
-    // Save control result to DB
-    await saveControlResult(scanId, orgId, frameworkType, rule, raw, state.sources);
   }
 
   // Update state for next chunk
@@ -578,7 +625,8 @@ async function saveControlResult(
   frameworkType: string,
   rule: { id: string; code: string },
   raw: ControlEvalResult,
-  sources?: Array<{ type: string; scannedAt: string; reliability: string; label: string }>
+  sources?: Array<{ type: string; scannedAt: string; reliability: string; label: string }>,
+  evaluationError?: string
 ): Promise<void> {
   const control = await db.control.findFirst({
     where: {
@@ -601,6 +649,7 @@ async function saveControlResult(
         lawyerQuestions: raw.lawyerQuestions,
         note: raw.note,
         evidenceSourcesJson: sources ? JSON.stringify(sources) : null,
+        evaluationError: evaluationError || null,
       },
       update: {
         status: raw.status,
@@ -611,15 +660,15 @@ async function saveControlResult(
         lawyerQuestions: raw.lawyerQuestions,
         note: raw.note,
         evidenceSourcesJson: sources ? JSON.stringify(sources) : null,
+        evaluationError: evaluationError || null,
       },
     });
   } else {
-    // This should never happen after the Phase 4 safety net runs in processEvidencePhase.
-    // If it does, the safety net failed or the plugin's rule.code doesn't match the
-    // Control row's code field. Loudly log and persist a scan event so the user sees it.
-    const msg = `Control row missing for code=${rule.code} framework=${frameworkType}. Result discarded.`;
+    // Control row missing — this should not happen after ensureControlsForFramework runs in processEvidencePhase.
+    // Mark as NO_EVIDENCE with explicit error so it's not silently dropped.
+    const msg = `Control row missing for code=${rule.code} framework=${frameworkType}`;
     console.error(`[saveControlResult] ${msg}`);
-    await pushScanEvent(scanId, `Warning: ${msg}`).catch(() => {});
+    await pushScanEvent(scanId, `Warning: ${msg}. This control will need manual review.`).catch(() => {});
   }
 }
 

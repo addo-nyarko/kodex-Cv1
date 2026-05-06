@@ -63,6 +63,7 @@ export async function GET(
       evidenceUsed: cr.evidenceUsed,
       evidenceSources: cr.evidenceSourcesJson ? JSON.parse(cr.evidenceSourcesJson) : [],
       note: cr.note,
+      evaluationError: cr.evaluationError || null,
       control: {
         code: cr.control.code,
         title: cr.control.title,

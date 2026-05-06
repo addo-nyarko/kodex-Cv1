@@ -179,11 +179,39 @@ Return ONLY the JSON object, no markdown fencing.`;
 
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) {
-      console.warn(`LLM evaluator returned no JSON for ${rule.code}, falling back to static check`);
-      return rule.check(evidence);
+      console.error(
+        `[llm-evaluator] No JSON found in LLM response for ${rule.code}. Raw response:\n${text.substring(0, 500)}`
+      );
+      // Return NO_EVIDENCE instead of silent fallback — failure is now explicit
+      return {
+        status: "NO_EVIDENCE",
+        confidence: 0,
+        evidenceUsed: [],
+        gaps: ["LLM evaluation failed — could not parse response. Manual review required."],
+        remediations: ["Review this control manually with LLM output available for reference"],
+        lawyerQuestions: [],
+        note: `LLM response parsing failed. Response: ${text.substring(0, 200)}...`,
+      };
     }
 
-    const parsed = JSON.parse(match[0]) as ControlEvalResult & { summary?: string };
+    let parsed: ControlEvalResult & { summary?: string };
+    try {
+      parsed = JSON.parse(match[0]) as ControlEvalResult & { summary?: string };
+    } catch (parseErr) {
+      console.error(
+        `[llm-evaluator] JSON parse failed for ${rule.code}. Raw match:\n${match[0].substring(0, 500)}`
+      );
+      // Return NO_EVIDENCE instead of silent fallback
+      return {
+        status: "NO_EVIDENCE",
+        confidence: 0,
+        evidenceUsed: [],
+        gaps: ["LLM evaluation failed — invalid JSON response. Manual review required."],
+        remediations: ["Review this control manually"],
+        lawyerQuestions: [],
+        note: `JSON parse error: ${parseErr instanceof Error ? parseErr.message : "Unknown error"}`,
+      };
+    }
 
     return {
       status: parsed.status,
@@ -195,9 +223,18 @@ Return ONLY the JSON object, no markdown fencing.`;
       note: parsed.summary ?? parsed.note ?? "",
     };
   } catch (err) {
-    console.error(`LLM evaluation failed for ${rule.code}:`, err);
-    // Fall back to static check on error
-    return rule.check(evidence);
+    console.error(`[llm-evaluator] LLM API call failed for ${rule.code}:`, err);
+    // Return NO_EVIDENCE instead of falling back to static check
+    // This makes the failure explicit instead of hiding it
+    return {
+      status: "NO_EVIDENCE",
+      confidence: 0,
+      evidenceUsed: [],
+      gaps: ["LLM evaluation failed — API error. Manual review required."],
+      remediations: ["Review this control manually"],
+      lawyerQuestions: [],
+      note: `LLM error: ${err instanceof Error ? err.message : "Unknown error"}`,
+    };
   }
 }
 
